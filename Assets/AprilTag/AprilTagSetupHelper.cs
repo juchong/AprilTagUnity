@@ -30,7 +30,7 @@ namespace AprilTag
         public void SetupAprilTagController()
         {
             // Find AprilTagController in the scene
-            var aprilTagController = FindObjectOfType<AprilTagController>();
+            var aprilTagController = FindFirstObjectByType<AprilTagController>();
             if (aprilTagController == null)
             {
                 if (logSetup) Debug.LogError("[AprilTagSetupHelper] No AprilTagController found in scene!");
@@ -38,7 +38,7 @@ namespace AprilTag
             }
 
             // Find WebCamTextureManager in the scene
-            var webCamTextureManager = FindObjectOfType<WebCamTextureManager>();
+            var webCamTextureManager = FindFirstObjectByType<WebCamTextureManager>();
             if (webCamTextureManager == null)
             {
                 if (logSetup) Debug.LogError("[AprilTagSetupHelper] No WebCamTextureManager found in scene!");

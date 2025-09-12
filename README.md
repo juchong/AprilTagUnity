@@ -5,7 +5,7 @@ A Unity project that implements AprilTag detection for Meta Quest VR headsets us
 ## Overview
 
 AprilTagUnity combines the power of:
-- **AprilTag detection** using Keijiro Takahashi's `jp.keijiro.apriltag` package
+- **AprilTag detection** using locally integrated AprilTag library (originally from Keijiro Takahashi)
 - **Meta Passthrough Camera API** for accessing the Quest's camera feed
 - **Unity XR** for VR/MR application development
 
@@ -51,8 +51,9 @@ The project provides a seamless way to detect and track AprilTag markers in real
 3. **Install Dependencies**
    The project uses Unity Package Manager with the following key dependencies:
    - `com.meta.xr.sdk.all` (v78.0.0) - Meta XR SDK
-   - `jp.keijiro.apriltag` (v1.0.2) - AprilTag detection library
    - `com.unity.xr.openxr` (v1.13.2) - OpenXR support
+   
+   Note: The AprilTag library is locally integrated and doesn't require external package installation.
 
 4. **Build and Deploy**
    - Connect your Quest headset via USB
@@ -94,11 +95,19 @@ The project includes several sample scenes in `Assets/PassthroughCameraApiSample
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
+| `tagFamily` | Tag family to detect (Tag36h11 or TagStandard41h12) | Tag36h11 |
 | `tagSizeMeters` | Physical size of AprilTag markers | 0.08m |
 | `decimate` | Downscale factor for detection (1-8) | 2 |
 | `maxDetectionsPerSecond` | Detection frequency limit | 15 fps |
 | `horizontalFovDeg` | Camera field of view | 78° |
 | `scaleVizToTagSize` | Scale visualizations to tag size | true |
+
+### Tag Family Selection
+
+- **Tag36h11** (default): Recommended for ArUcO detector compatibility and general use
+- **TagStandard41h12**: Original AprilTag format with higher data density but requires more processing
+
+**Note**: You can download tag images from the [AprilTag Images repository](https://github.com/AprilRobotics/apriltag-imgs). Print them or display them on a screen for testing.
 
 ### Performance Tuning
 
@@ -113,6 +122,12 @@ The project includes several sample scenes in `Assets/PassthroughCameraApiSample
 public class MyAprilTagHandler : MonoBehaviour
 {
     [SerializeField] private AprilTagController aprilTagController;
+    
+    void Start()
+    {
+        // Configure for tag36h11 (default) or tagStandard41h12
+        aprilTagController.tagFamily = AprilTag.Interop.TagFamily.Tag36h11;
+    }
     
     void Update()
     {
@@ -146,7 +161,11 @@ Assets/
 ├── AprilTag/                    # Core AprilTag implementation
 │   ├── AprilTagController.cs    # Main detection controller
 │   ├── AprilTagSetupHelper.cs   # Automatic setup helper
-│   └── InputSystemFixer.cs      # Input system compatibility
+│   ├── InputSystemFixer.cs      # Input system compatibility
+│   └── Library/                 # Locally integrated AprilTag library
+│       ├── Runtime/             # C# API and Unity integration
+│       ├── Plugin/              # Native libraries for all platforms
+│       └── README.md            # Library documentation
 ├── PassthroughCameraApiSamples/ # Meta's official samples
 │   ├── CameraViewer/            # Basic camera viewer
 │   ├── MultiObjectDetection/    # AI object detection
@@ -162,12 +181,17 @@ Assets/
    - Ensure Meta's Passthrough Camera API is properly initialized
    - Check that the WebCamTextureManager is present in the scene
 
-2. **Poor Detection Performance**
+2. **WebCamTexture GPU Initialization Errors**
+   - The system now automatically waits for WebCamTexture to initialize
+   - Uses direct pixel access instead of Graphics.CopyTexture for better reliability
+   - Allow a few seconds for the camera feed to stabilize
+
+3. **Poor Detection Performance**
    - Increase decimation value (try 4-8)
    - Reduce detection frequency
    - Ensure good lighting conditions
 
-3. **Inaccurate Pose Estimation**
+4. **Inaccurate Pose Estimation**
    - Verify the tag size parameter matches your physical tags
    - Check camera calibration and FOV settings
    - Ensure tags are not too small or far away
@@ -194,7 +218,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- **Keijiro Takahashi** for the excellent [AprilTag Unity package](https://github.com/keijiro/jp.keijiro.apriltag)
+- **Keijiro Takahashi** for the excellent [AprilTag Unity package](https://github.com/keijiro/jp.keijiro.apriltag) (now locally integrated)
+- **April Robotics Laboratory** for the original [AprilTag system](https://github.com/juchong/apriltag.git)
 - **Meta** for the Passthrough Camera API and XR SDK
 - **Unity Technologies** for the XR framework
 
