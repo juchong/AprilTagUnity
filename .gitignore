@@ -1,0 +1,116 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Unity 6 (6000.x) - .gitignore
+# Keep:  Assets/, Packages/, ProjectSettings/ (and all .meta files)
+# Ignore: Generated caches, local user prefs, build artifacts, IDE cruft
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Unity generated folders
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+UserSettings/
+Artifacts/
+Bee/
+CrashReports/
+Sysroot/                  # IL2CPP toolchain cache (when exported)
+il2cpp_cache/
+
+# Addressables / SBP build output (keep AddressableAssetsData itself)
+ServerData/
+
+# Unity Package Manager misc cache (keep Packages/ folder which holds manifest & lock)
+UnityPackageManager/
+
+# Unity Recorder default output
+Recordings/
+
+# Burst / DOTS transient caches (redundant with Library/, here for clarity)
+*.burst
+*.burst.debug
+*.burst.safetychecks
+
+# Generated solution & project files (Unity can regenerate these)
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+
+# TextMesh Pro auto-generated font atlas (safe to regen)
+*.asset.meta~          # temp metas
+# (Note: actual .asset and .meta for TMP should be committed; above only temp)
+
+# Crash/diagnostics
+*.stacktrace
+*.dmp
+*.log
+*.sysinfo
+
+# Platform-specific build outputs
+# Android / Gradle
+.gradle/
+gradle/
+**/gradle.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+# iOS / Xcode
+DerivedData/
+*.xcworkspace/
+*.xcuserstate
+*.xcuserdata/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+# Windows UWP
+[Bb]in/
+[Aa]ppPackages/
+
+# IDEs & editors
+# VS / VS for Mac / Rider
+.vs/
+.idea/
+*.sln.iml
+*.DotSettings.user
+# VS Code (project-wide settings are often user-specific; keep if your team wants them)
+.vscode/
+# MonoDevelop
+*.userprefs
+
+# OS files
+.DS_Store
+.DS_Store?
+*.swp
+*.swo
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+Icon\r
+
+# Package managers / tooling (optional; uncomment if present in your repo root)
+# node_modules/
+# yarn.lock
+# package-lock.json
+
+# Unity Cloud Build / CI artifacts (adjust if you export to repo)
+# UCBGenerated/
+# CIArtifacts/
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Optional: Git LFS recommendations (uncomment if using LFS)
+#   git lfs track "*.psd" "*.tga" "*.png" "*.jpg" "*.wav" "*.mp4" "*.mov" "*.fbx" "*.anim" "*.controller" "*.prefab" "*.unity" "*.ttf"
+# ──────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,204 @@
+// Assets/AprilTag/AprilTagController.cs
+// Quest-only AprilTag tracker using Meta Passthrough + Keijiro's jp.keijiro.apriltag.
+// Uses reflection to read WebCamTexture so there's no compile-time dependency on WebCamTextureManager.
+
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using UnityEngine;
+using AprilTag; // from jp.keijiro.apriltag
+using PassthroughCameraSamples;
+
+public class AprilTagController : MonoBehaviour
+{
+    [Header("Passthrough Feed")]
+    [Tooltip("Assign the WebCamTextureManager component from Meta's Passthrough Camera API samples.")]
+    [SerializeField] private UnityEngine.Object webCamManager;  // reflection target
+    [Tooltip("Optional: override the feed with your own WebCamTexture.")]
+    [SerializeField] private WebCamTexture webCamTextureOverride;
+
+    [Header("Visualization")]
+    [SerializeField] private GameObject tagVizPrefab;
+    [SerializeField] private bool scaleVizToTagSize = true;
+
+    [Header("Detection")]
+    [Tooltip("Physical tag edge length (meters).")]
+    [SerializeField] private float tagSizeMeters = 0.08f;
+    [Tooltip("Downscale factor for detection (1 = full res, 2 = half, etc.).")]
+    [Range(1, 8)][SerializeField] private int decimate = 2;
+    [Tooltip("Max detection updates per second.")]
+    [SerializeField] private float maxDetectionsPerSecond = 15f;
+    [Tooltip("Horizontal FOV (degrees) of the passthrough camera.")]
+    [SerializeField] private float horizontalFovDeg = 78f;
+
+    [Header("Diagnostics")]
+    [SerializeField] private bool logDetections = true;
+    [SerializeField] private bool logDebugInfo = true;
+
+    // CPU buffers
+    private Texture2D _readable;
+    private Color32[] _rgba;
+
+    // Detector (recreated when size/decimate changes)
+    private TagDetector _detector;
+    private int _detW, _detH, _detDecim;
+
+    private float _nextDetectT;
+    private readonly Dictionary<int, Transform> _vizById = new();
+
+    void OnDisable() => DisposeDetector();
+    void OnDestroy() => DisposeDetector();
+
+    void Awake()
+    {
+        // Fix Input System issues on startup
+        InputSystemFixer.FixAllEventSystems();
+    }
+
+    void Update()
+    {
+        var wct = GetActiveWebCamTexture();
+        if (wct == null)
+        {
+            if (logDebugInfo) Debug.LogWarning("[AprilTag] No WebCamTexture available");
+            return;
+        }
+        
+        if (!wct.isPlaying)
+        {
+            if (logDebugInfo) Debug.LogWarning("[AprilTag] WebCamTexture is not playing");
+            return;
+        }
+        
+        if (wct.width <= 16 || wct.height <= 16)
+        {
+            if (logDebugInfo) Debug.LogWarning($"[AprilTag] WebCamTexture dimensions too small: {wct.width}x{wct.height}");
+            return;
+        }
+
+        if (Time.time < _nextDetectT) return;
+        _nextDetectT = Time.time + 1f / Mathf.Max(1f, maxDetectionsPerSecond);
+        
+        if (logDebugInfo) Debug.Log($"[AprilTag] Processing frame: {wct.width}x{wct.height}, detector: {_detector != null}");
+
+        // Ensure readable buffer and detector match the feed
+        if (_readable == null || _readable.width != wct.width || _readable.height != wct.height)
+        {
+            if (logDebugInfo) Debug.Log($"[AprilTag] Creating new readable texture: {wct.width}x{wct.height}");
+            _readable = new Texture2D(wct.width, wct.height, TextureFormat.RGBA32, false);
+            _rgba = new Color32[wct.width * wct.height];
+            RecreateDetectorIfNeeded(wct.width, wct.height, decimate);
+        }
+        else if (_detector == null || _detW != wct.width || _detH != wct.height || _detDecim != decimate)
+        {
+            if (logDebugInfo) Debug.Log($"[AprilTag] Recreating detector: {wct.width}x{wct.height}, decimate={decimate}");
+            RecreateDetectorIfNeeded(wct.width, wct.height, decimate);
+        }
+
+        // Copy pixels from passthrough to CPU
+        Graphics.CopyTexture(wct, _readable);
+        _rgba = _readable.GetPixels32();
+
+        // NOTE: Correct usage � DO NOT pass _rgba to the constructor.
+        // Constructor takes (width, height, decimation).
+        // Detection call takes (pixels, fovDeg, tagSizeMeters).
+        _detector.ProcessImage(_rgba.AsSpan(), horizontalFovDeg, tagSizeMeters);
+
+        // Visualize detected tags
+        var seen = new HashSet<int>();
+        var detectedCount = 0;
+        foreach (var t in _detector.DetectedTags)
+        {
+            detectedCount++;
+            seen.Add(t.ID);
+            if (logDetections) Debug.Log($"[AprilTag] id={t.ID} pos={t.Position:F3} rot={t.Rotation.eulerAngles:F1}");
+
+            if (!_vizById.TryGetValue(t.ID, out var tr) || tr == null)
+            {
+                if (!tagVizPrefab) continue;
+                tr = Instantiate(tagVizPrefab).transform;
+                tr.name = $"AprilTag_{t.ID}";
+                _vizById[t.ID] = tr;
+            }
+
+            // Tag poses are camera-relative; place them in world via the HMD camera.
+            var cam = Camera.main ? Camera.main.transform : transform;
+            tr.SetPositionAndRotation(cam.TransformPoint(t.Position), cam.rotation * t.Rotation);
+            if (scaleVizToTagSize) tr.localScale = Vector3.one * tagSizeMeters;
+            tr.gameObject.SetActive(true);
+        }
+
+        // Log detection results
+        if (logDebugInfo && detectedCount > 0)
+        {
+            Debug.Log($"[AprilTag] Detected {detectedCount} tags this frame");
+        }
+        else if (logDebugInfo && Time.frameCount % 60 == 0) // Log every 60 frames when no tags detected
+        {
+            Debug.Log($"[AprilTag] No tags detected (frame {Time.frameCount})");
+        }
+
+        // Hide those not seen this frame
+        foreach (var kv in _vizById)
+            if (!seen.Contains(kv.Key) && kv.Value) kv.Value.gameObject.SetActive(false);
+    }
+
+    private void RecreateDetectorIfNeeded(int width, int height, int dec)
+    {
+        DisposeDetector();
+        _detector = new TagDetector(width, height, Mathf.Max(1, dec)); // <� width, height, decimation
+        _detW = width; _detH = height; _detDecim = Mathf.Max(1, dec);
+        
+        if (logDebugInfo) Debug.Log($"[AprilTag] Created detector: {width}x{height}, decimate={Mathf.Max(1, dec)}");
+    }
+
+    private void DisposeDetector()
+    {
+        _detector?.Dispose();
+        _detector = null;
+    }
+
+    private WebCamTexture GetActiveWebCamTexture()
+    {
+        if (webCamTextureOverride) 
+        {
+            if (logDebugInfo) Debug.Log("[AprilTag] Using WebCamTexture override");
+            return webCamTextureOverride;
+        }
+        
+        // First try to get WebCamTexture from assigned webCamManager
+        if (webCamManager) 
+        {
+            // Try to read WebCamTextureManager.WebCamTexture (Meta sample) via reflection
+            var t = webCamManager.GetType();
+            var prop = t.GetProperty("WebCamTexture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (prop != null && typeof(WebCamTexture).IsAssignableFrom(prop.PropertyType))
+            {
+                var wct = prop.GetValue(webCamManager) as WebCamTexture;
+                if (logDebugInfo) Debug.Log($"[AprilTag] Got WebCamTexture from assigned manager: {wct != null}");
+                if (wct != null) return wct;
+            }
+
+            // Fallbacks (if your provider exposes Texture/SourceTexture)
+            var texProp = t.GetProperty("Texture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                       ?? t.GetProperty("SourceTexture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var fallbackWct = texProp?.GetValue(webCamManager) as WebCamTexture;
+            if (logDebugInfo) Debug.Log($"[AprilTag] Got WebCamTexture from assigned manager fallback: {fallbackWct != null}");
+            if (fallbackWct != null) return fallbackWct;
+        }
+
+        // If no assigned manager or it didn't work, try to find WebCamTextureManager in the scene
+        if (logDebugInfo) Debug.Log("[AprilTag] No assigned WebCamManager or it failed, searching for WebCamTextureManager in scene");
+        
+        var webCamTextureManager = FindObjectOfType<PassthroughCameraSamples.WebCamTextureManager>();
+        if (webCamTextureManager != null)
+        {
+            var wct = webCamTextureManager.WebCamTexture;
+            if (logDebugInfo) Debug.Log($"[AprilTag] Found WebCamTextureManager in scene: {wct != null}");
+            return wct;
+        }
+
+        if (logDebugInfo) Debug.LogWarning("[AprilTag] No WebCamTextureManager found in scene");
+        return null;
+    }
+}
