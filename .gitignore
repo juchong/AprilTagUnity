@@ -116,3 +116,6 @@ Icon^M
 # Optional: Git LFS recommendations (uncomment if using LFS)
 #   git lfs track "*.psd" "*.tga" "*.png" "*.jpg" "*.wav" "*.mp4" "*.mov" "*.fbx" "*.anim" "*.controller" "*.prefab" "*.unity" "*.ttf"
 # ──────────────────────────────────────────────────────────────────────────────
+/.utmp/Debug
+/.utmp/tools
+how 24caba0 --name-only
