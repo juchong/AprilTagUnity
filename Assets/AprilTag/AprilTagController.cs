@@ -1031,14 +1031,9 @@ public class AprilTagController : MonoBehaviour
         // This handles the Z-axis rotation mapping to X-axis rotation issue
         var convertedRotation = aprilTagRotation;
         
-        // Apply 90-degree rotation around X-axis to align coordinate systems
-        var coordinateTransform = Quaternion.Euler(90f, 0f, 0f);
+        // Apply 180-degree rotation around Y-axis to align coordinate systems
+        var coordinateTransform = Quaternion.Euler(0f, 180f, 0f);
         convertedRotation = coordinateTransform * convertedRotation;
-        
-        // Additional -90-degree rotation around X-axis to fix red face orientation
-        // This ensures the red face (bottom) touches the tag surface
-        var xAxisTransform = Quaternion.Euler(-90f, 0f, 0f);
-        convertedRotation = convertedRotation * xAxisTransform;
         
         return convertedRotation;
     }
