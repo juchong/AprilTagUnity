@@ -272,19 +272,21 @@ public class AprilTagSceneSetup : MonoBehaviour
         wireframeGO.transform.SetParent(parent);
         wireframeGO.transform.localPosition = Vector3.zero;
         wireframeGO.transform.localScale = Vector3.one;
+        wireframeGO.transform.localRotation = Quaternion.Euler(0f, 0f, 0f); // Rotated 90 degrees around X axis
         
-        // Define cube vertices (8 corners)
+        // Define cube vertices (8 corners) - positions after -90 degree X rotation
+        // After rotating -90 degrees around X: Y becomes Z, Z becomes -Y
         var vertices = new Vector3[]
         {
-            // Bottom face (red - touching the tag)
+            // Bottom face (red - touching the tag) - now at Z = -0.5
             new Vector3(-0.5f, -0.5f, -0.5f), // 0
             new Vector3(0.5f, -0.5f, -0.5f),  // 1
-            new Vector3(0.5f, -0.5f, 0.5f),   // 2
-            new Vector3(-0.5f, -0.5f, 0.5f),  // 3
+            new Vector3(0.5f, 0.5f, -0.5f),   // 2
+            new Vector3(-0.5f, 0.5f, -0.5f),  // 3
             
-            // Top face (green - above the tag)
-            new Vector3(-0.5f, 0.5f, -0.5f),  // 4
-            new Vector3(0.5f, 0.5f, -0.5f),   // 5
+            // Top face (green - above the tag) - now at Z = 0.5
+            new Vector3(-0.5f, -0.5f, 0.5f),  // 4
+            new Vector3(0.5f, -0.5f, 0.5f),   // 5
             new Vector3(0.5f, 0.5f, 0.5f),    // 6
             new Vector3(-0.5f, 0.5f, 0.5f)    // 7
         };
@@ -297,11 +299,11 @@ public class AprilTagSceneSetup : MonoBehaviour
         greenLineRenderer.useWorldSpace = false;
         greenLineRenderer.loop = false;
         
-        // Green lines: top face + vertical edges
+        // Green lines: front face + vertical edges
         var greenLineIndices = new int[]
         {
-            // Top face (green) - 4 lines  
-            4, 5, 5, 6, 6, 7, 7, 4,
+            // Front face (green) - 4 lines  
+            0, 1, 1, 2, 2, 3, 3, 0,
             // Vertical edges (green) - 4 lines
             0, 4, 1, 5, 2, 6, 3, 7
         };
@@ -329,8 +331,8 @@ public class AprilTagSceneSetup : MonoBehaviour
         bottomLineRenderer.useWorldSpace = false;
         bottomLineRenderer.loop = false;
         
-        // Bottom face only (red)
-        var bottomLineIndices = new int[] { 0, 1, 1, 2, 2, 3, 3, 0 };
+        // Back face only (red) - now the face at Z = 0.5
+        var bottomLineIndices = new int[] { 4, 5, 5, 6, 6, 7, 7, 4 };
         var bottomLinePositions = new Vector3[bottomLineIndices.Length];
         for (int i = 0; i < bottomLineIndices.Length; i++)
         {
@@ -343,7 +345,7 @@ public class AprilTagSceneSetup : MonoBehaviour
         // Create a red dot to mark one of the corners of the AprilTag
         var dotGO = new GameObject("CornerDot");
         dotGO.transform.SetParent(wireframeGO.transform);
-        dotGO.transform.localPosition = new Vector3(-0.5f, -0.5f, -0.5f); // Bottom-left corner
+        dotGO.transform.localPosition = new Vector3(-0.5f, -0.5f, 0.5f); // Back face corner
         dotGO.transform.localScale = Vector3.one * 0.1f; // Double size for better visibility
         
         // Create a sphere for the dot

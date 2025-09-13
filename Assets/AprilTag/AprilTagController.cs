@@ -258,7 +258,9 @@ public class AprilTagController : MonoBehaviour
                         Debug.Log($"[AprilTag] Using corner-based positioning for tag {t.ID}: cornerCenter={cornerCenter.Value}");
                     }
                     worldPosition = GetWorldPositionFromCornerCenter(cornerCenter.Value, t);
-                    worldRotation = ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
+                    // Convert camera-space rotation to world space
+                    var camRef = GetCorrectCameraReference();
+                    worldRotation = camRef.rotation * ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
                 }
                 else
                 {
@@ -267,7 +269,9 @@ public class AprilTagController : MonoBehaviour
                     if (worldPos.HasValue)
                     {
                         worldPosition = worldPos.Value;
-                        worldRotation = ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
+                        // Convert camera-space rotation to world space
+                    var camRef = GetCorrectCameraReference();
+                    worldRotation = camRef.rotation * ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
                     }
                     else
                     {
@@ -285,7 +289,9 @@ public class AprilTagController : MonoBehaviour
                         // Transform camera-space position to world space
                         var cam = GetCorrectCameraReference();
                         worldPosition = cam.position + cam.rotation * adjustedPosition;
-                        worldRotation = ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
+                        // Convert camera-space rotation to world space
+                    var camRef = GetCorrectCameraReference();
+                    worldRotation = camRef.rotation * ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
                     }
                 }
             }
@@ -1024,16 +1030,38 @@ public class AprilTagController : MonoBehaviour
     private Quaternion ConvertAprilTagRotationToUnity(Quaternion aprilTagRotation)
     {
         // Convert AprilTag rotation to Unity rotation
-        // AprilTag uses right-handed coordinate system
-        // Unity uses left-handed coordinate system
-        
         // Apply coordinate system transformation
         // This handles the Z-axis rotation mapping to X-axis rotation issue
         var convertedRotation = aprilTagRotation;
-        
         // Apply 180-degree rotation around Y-axis to align coordinate systems
-        var coordinateTransform = Quaternion.Euler(0f, 180f, 0f);
+        var coordinateTransform = Quaternion.Euler(0f, 0f, 0f);
         convertedRotation = coordinateTransform * convertedRotation;
+        
+        // Reassign axes for coordinate system mapping
+        var eulerAngles = convertedRotation.eulerAngles;
+        var x = eulerAngles.x;
+        var y = eulerAngles.y;
+        var z = eulerAngles.z;
+        
+        // Debug: Log original AprilTag rotation
+        if (logDebugInfo)
+        {
+            Debug.Log($"[AprilTag] Original rotation: {aprilTagRotation.eulerAngles:F3}");
+            Debug.Log($"[AprilTag] After coordinate transform: {convertedRotation.eulerAngles:F3}");
+        }
+        
+        // Reassign axes (modify these to test different mappings)
+        var newX = -x;  // Try: y, z, -x, -y, -z
+        var newY = y;  // Try: x, z, -x, -y, -z
+        var newZ = z;  // Try: x, y, -x, -y, -z
+        
+        convertedRotation = Quaternion.Euler(newX, newY, newZ);
+        
+        // Debug: Log final converted rotation
+        if (logDebugInfo)
+        {
+            Debug.Log($"[AprilTag] Final converted rotation: {convertedRotation.eulerAngles:F3}");
+        }
         
         return convertedRotation;
     }
