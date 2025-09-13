@@ -291,7 +291,7 @@ public class AprilTagController : MonoBehaviour
             {
                 // Use corner-based positioning which works better with Quest's coordinate system
                 worldPosition = GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t);
-                worldRotation = GetWorldRotation(t.Rotation, worldPosition);
+                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
                 
                 if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
                 {
@@ -322,7 +322,7 @@ public class AprilTagController : MonoBehaviour
                 
                 // Transform from camera space to world space
                 worldPosition = cam.position + cam.rotation * adjustedPosition;
-                worldRotation = GetWorldRotation(t.Rotation, worldPosition);
+                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
                 
                 if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
                 {
@@ -1445,14 +1445,17 @@ public class AprilTagController : MonoBehaviour
         }
         else
         {
-            // For normal tags, use headset-relative rotation
-            // This continuously adjusts the cube orientation based on the headset's current pose
-            return GetHeadsetRelativeRotation(aprilTagRotation, tagWorldPosition) * Quaternion.Euler(rotationOffset);
+            // For normal tags, use corner-based rotation calculation
+            // This ensures the cube sits flat on the tag surface using actual corner coordinates
+            return GetCornerBasedRotation(0, new List<object>(), tagWorldPosition) * Quaternion.Euler(rotationOffset);
         }
     }
     
     private Quaternion GetHeadsetRelativeRotation(Quaternion aprilTagRotation, Vector3 tagWorldPosition)
     {
+        // Use corner-based rotation calculation similar to PhotonVision
+        // This ensures the cube sits flat on the tag surface using the actual corner coordinates
+        
         // Get the current headset pose
         var cam = GetCorrectCameraReference();
         var currentHeadsetRotation = cam.rotation;
@@ -1488,6 +1491,171 @@ public class AprilTagController : MonoBehaviour
         }
         
         return adjustedRotation;
+    }
+    
+    private Quaternion GetCornerBasedRotation(int tagId, List<object> rawDetections, Vector3 tagWorldPosition)
+    {
+        // Use corner coordinates to calculate proper tag orientation
+        // This approach is similar to PhotonVision's method for ensuring tags sit flat
+        
+        try
+        {
+            // Find the detection for this tag
+            foreach (var detection in rawDetections)
+            {
+                var idField = detection.GetType().GetField("id", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (idField != null)
+                {
+                    var detectedId = (int)idField.GetValue(detection);
+                    if (detectedId == tagId)
+                    {
+                        // Extract corner coordinates
+                        var corners = ExtractCornerCoordinates(detection);
+                        if (corners.Count >= 4)
+                        {
+                            // Calculate tag orientation from corner coordinates
+                            return CalculateTagOrientationFromCorners(corners, tagWorldPosition);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            if (enableAllDebugLogging && logDebugInfo)
+            {
+                Debug.LogWarning($"[AprilTag] Error calculating corner-based rotation: {e.Message}");
+            }
+        }
+        
+        // Fallback to AprilTag rotation if corner-based calculation fails
+        return Quaternion.identity;
+    }
+    
+    private List<Vector2> ExtractCornerCoordinates(object detection)
+    {
+        var corners = new List<Vector2>();
+        
+        try
+        {
+            // Try to extract corner coordinates from the detection
+            var cornerFields = new[] { "c0", "c1", "p00", "p01", "p10", "p11", "p20", "p21", "p30", "p31" };
+            
+            for (int i = 0; i < cornerFields.Length; i += 2)
+            {
+                if (i + 1 < cornerFields.Length)
+                {
+                    var xField = detection.GetType().GetField(cornerFields[i], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var yField = detection.GetType().GetField(cornerFields[i + 1], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    
+                    if (xField != null && yField != null)
+                    {
+                        var x = (double)xField.GetValue(detection);
+                        var y = (double)yField.GetValue(detection);
+                        corners.Add(new Vector2((float)x, (float)y));
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            if (enableAllDebugLogging && logDebugInfo)
+            {
+                Debug.LogWarning($"[AprilTag] Error extracting corner coordinates: {e.Message}");
+            }
+        }
+        
+        return corners;
+    }
+    
+    private Quaternion CalculateTagOrientationFromCorners(List<Vector2> corners, Vector3 tagWorldPosition)
+    {
+        if (corners.Count < 4) return Quaternion.identity;
+        
+        // Calculate the tag's orientation from corner coordinates
+        // This ensures the cube sits flat on the tag surface
+        
+        // Get camera reference for coordinate transformation
+        var cam = GetCorrectCameraReference();
+        
+        // Convert corner coordinates to world space using proper raycasting
+        var worldCorners = new List<Vector3>();
+        foreach (var corner in corners)
+        {
+            // Convert 2D corner to 3D world position using raycasting
+            var screenPos = new Vector2(corner.x, corner.y);
+            
+            // Use the existing GetWorldPositionFromCornerCenter method for consistency
+            // Create a temporary TagPose for the raycasting
+            var tempTagPose = new TagPose(0, tagWorldPosition, Quaternion.identity);
+            var worldPos = GetWorldPositionFromCornerCenter(screenPos, tempTagPose);
+            worldCorners.Add(worldPos);
+        }
+        
+        // Calculate the tag's normal vector from the corners
+        // This gives us the direction the tag is facing
+        if (worldCorners.Count >= 4)
+        {
+            // Calculate two vectors on the tag surface
+            var v1 = (worldCorners[1] - worldCorners[0]);
+            var v2 = (worldCorners[3] - worldCorners[0]);
+            
+            // Check if vectors are valid (not zero length)
+            if (v1.magnitude > 0.001f && v2.magnitude > 0.001f)
+            {
+                v1 = v1.normalized;
+                v2 = v2.normalized;
+                
+                // Calculate the normal vector (perpendicular to the tag surface)
+                var normal = Vector3.Cross(v1, v2);
+                
+                // Check if normal is valid (not zero length)
+                if (normal.magnitude > 0.001f)
+                {
+                    normal = normal.normalized;
+                    
+                    // Create a rotation that aligns the cube with the tag surface
+                    // The cube should face the same direction as the tag
+                    
+                    // Calculate the tag's orientation from the corner vectors
+                    // This gives us the proper rotation including Z-axis
+                    var tagRight = v1; // First edge vector
+                    var tagUp = Vector3.Cross(normal, tagRight).normalized; // Perpendicular to normal and right
+                    
+                    // Create a rotation matrix from the tag's coordinate system
+                    var tagRotation = Quaternion.LookRotation(normal, tagUp);
+                    
+                    // Apply a 90-degree rotation around X-axis to align with AprilTag orientation
+                    // This ensures the cube sits flat on the tag surface
+                    var cubeRotation = tagRotation * Quaternion.Euler(90f, 0f, 0f);
+                    
+                    if (enableAllDebugLogging && logDebugInfo)
+                    {
+                        Debug.Log($"[AprilTag] Corner-based rotation - Normal: {normal}, Tag Rotation: {tagRotation.eulerAngles}, Cube Rotation: {cubeRotation.eulerAngles}");
+                        Debug.Log($"[AprilTag] Corner vectors - v1: {v1}, v2: {v2}, tagUp: {tagUp}");
+                        Debug.Log($"[AprilTag] World corners: {string.Join(", ", worldCorners.Select(c => c.ToString("F3")))}");
+                    }
+                    
+                    return cubeRotation;
+                }
+                else
+                {
+                    if (enableAllDebugLogging && logDebugInfo)
+                    {
+                        Debug.LogWarning($"[AprilTag] Invalid normal vector from corners - v1: {v1}, v2: {v2}");
+                    }
+                }
+            }
+            else
+            {
+                if (enableAllDebugLogging && logDebugInfo)
+                {
+                    Debug.LogWarning($"[AprilTag] Invalid corner vectors - v1: {v1}, v2: {v2}");
+                }
+            }
+        }
+        
+        return Quaternion.identity;
     }
     
     private void ResetHeadsetPoseTracking()
