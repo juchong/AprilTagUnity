@@ -51,16 +51,52 @@ public class AprilTagController : MonoBehaviour
     private int _previousTagCount = 0;
 
     void OnDisable() => DisposeDetector();
-    void OnDestroy() => DisposeDetector();
 
     void Awake()
     {
         // Fix Input System issues on startup
         InputSystemFixer.FixAllEventSystems();
+        
+        // Subscribe to permission events
+        AprilTagPermissionsManager.OnAllPermissionsGranted += OnAllPermissionsGranted;
+        AprilTagPermissionsManager.OnPermissionsDenied += OnPermissionsDenied;
+    }
+    
+    void OnDestroy()
+    {
+        // Dispose detector resources
+        DisposeDetector();
+        
+        // Unsubscribe from permission events
+        AprilTagPermissionsManager.OnAllPermissionsGranted -= OnAllPermissionsGranted;
+        AprilTagPermissionsManager.OnPermissionsDenied -= OnPermissionsDenied;
+    }
+    
+    private void OnAllPermissionsGranted()
+    {
+        if (logDebugInfo) Debug.Log("[AprilTag] All required permissions granted - ready to start detection");
+        // Permissions are now available, detection will start automatically in Update()
+    }
+    
+    private void OnPermissionsDenied()
+    {
+        if (logDebugInfo) Debug.LogWarning("[AprilTag] Required permissions denied - detection will not work properly");
+        // Could show UI message to user here
     }
 
     void Update()
     {
+        // Check permissions before proceeding with detection
+        if (!AprilTagPermissionsManager.HasAllPermissions)
+        {
+            // Only log this warning occasionally to avoid spam
+            if (logDebugInfo && Time.frameCount % 300 == 0) 
+            {
+                Debug.LogWarning("[AprilTag] Waiting for required permissions to be granted");
+            }
+            return;
+        }
+        
         var wct = GetActiveWebCamTexture();
         if (wct == null)
         {
