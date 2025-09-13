@@ -1532,6 +1532,7 @@ public class AprilTagController : MonoBehaviour
         return Quaternion.identity;
     }
     
+    
     private List<Vector2> ExtractCornerCoordinates(object detection)
     {
         var corners = new List<Vector2>();
@@ -1592,13 +1593,14 @@ public class AprilTagController : MonoBehaviour
             worldCorners.Add(worldPos);
         }
         
-        // Calculate the tag's normal vector from the corners
-        // This gives us the direction the tag is facing
+        // Calculate the tag's surface normal from the corners
+        // This gives us the direction perpendicular to the tag surface
         if (worldCorners.Count >= 4)
         {
-            // Calculate two vectors on the tag surface
-            var v1 = (worldCorners[1] - worldCorners[0]);
-            var v2 = (worldCorners[3] - worldCorners[0]);
+            // Calculate two vectors on the tag surface using the correct corner order
+            // AprilTag corners are typically ordered: top-left, top-right, bottom-right, bottom-left
+            var v1 = (worldCorners[1] - worldCorners[0]); // top-right to top-left
+            var v2 = (worldCorners[2] - worldCorners[1]); // bottom-right to top-right
             
             // Check if vectors are valid (not zero length)
             if (v1.magnitude > 0.001f && v2.magnitude > 0.001f)
@@ -1618,16 +1620,17 @@ public class AprilTagController : MonoBehaviour
                     // The cube should face the same direction as the tag
                     
                     // Calculate the tag's orientation from the corner vectors
-                    // This gives us the proper rotation including Z-axis
-                    var tagRight = v1; // First edge vector
+                    // Use the tag's actual edge directions for proper alignment
+                    var tagRight = v1; // First edge vector (top edge)
                     var tagUp = Vector3.Cross(normal, tagRight).normalized; // Perpendicular to normal and right
                     
                     // Create a rotation matrix from the tag's coordinate system
                     var tagRotation = Quaternion.LookRotation(normal, tagUp);
                     
                     // Apply a 90-degree rotation around X-axis to align with AprilTag orientation
+                    // and a 45-degree counterclockwise rotation around Z-axis to fix alignment
                     // This ensures the cube sits flat on the tag surface
-                    var cubeRotation = tagRotation * Quaternion.Euler(90f, 0f, 0f);
+                    var cubeRotation = tagRotation * Quaternion.Euler(0f, 0f, -225f);
                     
                     if (enableAllDebugLogging && logDebugInfo)
                     {

@@ -883,13 +883,17 @@ MonoBehaviour:
   enableQuestDebugging: 1
   useImprovedIntrinsics: 1
   worldLockedRotation: 1
+  visualizationScaleMultiplier: 1
+  testModeIdentityRotation: 0
+  forceCornerBasedPositioning: 0
   tagFamily: 1
-  tagSizeMeters: 0.1524
-  decimate: 1
+  tagSizeMeters: 0.165
+  decimate: 2
   maxDetectionsPerSecond: 60
   horizontalFovDeg: 78
   logDetections: 1
   logDebugInfo: 1
+  enableAllDebugLogging: 1
 --- !u!4 &233489933
 Transform:
   m_ObjectHideFlags: 0
