@@ -18,7 +18,7 @@ Bee/
 CrashReports/
 Sysroot/                  # IL2CPP toolchain cache (when exported)
 il2cpp_cache/
-.utmp/                    # Unity temporary files
+.utmp/*                   # Omit everything in .utmp subdirectory
 passthroughcamera_*/      # Passthrough camera debug folders
 
 # Addressables / SBP build output (keep AddressableAssetsData itself)
@@ -101,7 +101,7 @@ DerivedData/
 ehthumbs.db
 Thumbs.db
 desktop.ini
-Icon\r
+Icon^M
 
 # Package managers / tooling (optional; uncomment if present in your repo root)
 # node_modules/

@@ -4,6 +4,9 @@
 using UnityEngine;
 using UnityEngine.UI;
 using AprilTag; // For tag family enum
+using PassthroughCameraSamples;
+using Meta.XR.Samples;
+using Meta.XR;
 
 [System.Serializable]
 public class AprilTagSceneSetup : MonoBehaviour
@@ -15,6 +18,8 @@ public class AprilTagSceneSetup : MonoBehaviour
     [SerializeField] private bool createAprilTagController = true;
     [SerializeField] private bool createWebCamManager = true;
     [SerializeField] private bool connectToWebCamManager = true;
+    [SerializeField] private bool createEnvironmentRaycastManager = true;
+    [SerializeField] private bool setupQuestSpecificFeatures = true;
 
     [Header("Permission Manager Settings")]
     [SerializeField] private bool requestPermissionsOnStart = true;
@@ -39,10 +44,29 @@ public class AprilTagSceneSetup : MonoBehaviour
     [Header("Tag Visualization")]
     [SerializeField] private GameObject tagVizPrefab;
     [SerializeField] private bool createSimpleTagViz = true;
+    [SerializeField] private Camera referenceCamera;
+    [SerializeField] private Vector3 positionOffset = Vector3.zero;
+    [SerializeField] private Vector3 rotationOffset = Vector3.zero;
+    [SerializeField] private bool useCenterEyeTransform = true;
+    [SerializeField] private float cameraHeightOffset = 0.0f;
+    [SerializeField] private bool enableIPDCompensation = true;
+    [SerializeField] private bool usePassthroughRaycasting = true;
+    [SerializeField] private bool ignoreOcclusion = true;
+    [SerializeField] private float positionScaleFactor = 1.0f;
+    [SerializeField] private float minDetectionDistance = 0.3f;
+    [SerializeField] private float maxDetectionDistance = 20.0f;
+    [SerializeField] private bool enableDistanceScaling = true;
+    [SerializeField] private bool enableQuestDebugging = true;
 
     [Header("WebCam Manager Settings")]
     [SerializeField] private PassthroughCameraSamples.PassthroughCameraEye cameraEye = PassthroughCameraSamples.PassthroughCameraEye.Left;
     [SerializeField] private Vector2Int requestedResolution = new Vector2Int(0, 0); // 0,0 = highest resolution
+
+    [Header("Quest-Specific Settings")]
+    [SerializeField] private bool enablePassthroughRaycasting = true;
+    [SerializeField] private bool autoFindEnvironmentRaycastManager = true;
+    [SerializeField] private EnvironmentRaycastManager environmentRaycastManager;
+    [SerializeField] private bool createSimpleEnvironmentRaycastManager = true;
 
     void Awake()
     {
@@ -87,6 +111,11 @@ public class AprilTagSceneSetup : MonoBehaviour
             ConnectToWebCamManager();
         }
 
+        // Setup Quest-specific features
+        if (setupQuestSpecificFeatures)
+        {
+            SetupQuestSpecificFeatures();
+        }
 
         Debug.Log("[AprilTagSceneSetup] Complete AprilTag system setup finished!");
     }
@@ -142,6 +171,34 @@ public class AprilTagSceneSetup : MonoBehaviour
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var vizPrefabField = controllerType.GetField("tagVizPrefab", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var referenceCameraField = controllerType.GetField("referenceCamera", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var positionOffsetField = controllerType.GetField("positionOffset", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var rotationOffsetField = controllerType.GetField("rotationOffset", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var useCenterEyeTransformField = controllerType.GetField("useCenterEyeTransform", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var cameraHeightOffsetField = controllerType.GetField("cameraHeightOffset", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableIPDCompensationField = controllerType.GetField("enableIPDCompensation", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var usePassthroughRaycastingField = controllerType.GetField("usePassthroughRaycasting", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var environmentRaycastManagerField = controllerType.GetField("environmentRaycastManager", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var ignoreOcclusionField = controllerType.GetField("ignoreOcclusion", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var positionScaleFactorField = controllerType.GetField("positionScaleFactor", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var minDetectionDistanceField = controllerType.GetField("minDetectionDistance", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var maxDetectionDistanceField = controllerType.GetField("maxDetectionDistance", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableDistanceScalingField = controllerType.GetField("enableDistanceScaling", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableQuestDebuggingField = controllerType.GetField("enableQuestDebugging", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
             tagFamilyField?.SetValue(controller, tagFamily);
             tagSizeField?.SetValue(controller, tagSizeMeters);
@@ -151,6 +208,20 @@ public class AprilTagSceneSetup : MonoBehaviour
             scaleVizField?.SetValue(controller, scaleVizToTagSize);
             logDetectionsField?.SetValue(controller, logDetections);
             logDebugField?.SetValue(controller, logDebugInfo);
+            referenceCameraField?.SetValue(controller, referenceCamera);
+            positionOffsetField?.SetValue(controller, positionOffset);
+            rotationOffsetField?.SetValue(controller, rotationOffset);
+            useCenterEyeTransformField?.SetValue(controller, useCenterEyeTransform);
+            cameraHeightOffsetField?.SetValue(controller, cameraHeightOffset);
+            enableIPDCompensationField?.SetValue(controller, enableIPDCompensation);
+            usePassthroughRaycastingField?.SetValue(controller, usePassthroughRaycasting);
+            environmentRaycastManagerField?.SetValue(controller, environmentRaycastManager);
+            ignoreOcclusionField?.SetValue(controller, ignoreOcclusion);
+            positionScaleFactorField?.SetValue(controller, positionScaleFactor);
+            minDetectionDistanceField?.SetValue(controller, minDetectionDistance);
+            maxDetectionDistanceField?.SetValue(controller, maxDetectionDistance);
+            enableDistanceScalingField?.SetValue(controller, enableDistanceScaling);
+            enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
 
             // Set up tag visualization prefab
             GameObject vizPrefab = tagVizPrefab;
@@ -180,13 +251,22 @@ public class AprilTagSceneSetup : MonoBehaviour
         // Scale it to be small and flat
         prefab.transform.localScale = new Vector3(0.08f, 0.001f, 0.08f);
         
-        // Make it a bright color for visibility
+        // Make it a bright color for visibility and configure for no occlusion
         var renderer = prefab.GetComponent<Renderer>();
         if (renderer != null)
         {
-            renderer.material.color = Color.green;
-            renderer.material.SetFloat("_Metallic", 0f);
-            renderer.material.SetFloat("_Smoothness", 0.5f);
+            var material = renderer.sharedMaterial;
+            if (material != null)
+            {
+                material.color = Color.green;
+                material.SetFloat("_Metallic", 0f);
+                material.SetFloat("_Smoothness", 0.5f);
+                
+                // Configure to ignore occlusion
+                material.renderQueue = 2000; // High but valid render queue
+                material.SetInt("_ZWrite", 0); // Don't write to depth buffer
+                material.SetInt("_ZTest", 0); // Always pass depth test
+            }
         }
 
         // Remove the collider (not needed for visualization)
@@ -206,9 +286,18 @@ public class AprilTagSceneSetup : MonoBehaviour
         var outlineRenderer = outline.GetComponent<Renderer>();
         if (outlineRenderer != null)
         {
-            outlineRenderer.material.color = Color.white;
-            outlineRenderer.material.SetFloat("_Metallic", 0f);
-            outlineRenderer.material.SetFloat("_Smoothness", 0.8f);
+            var outlineMaterial = outlineRenderer.sharedMaterial;
+            if (outlineMaterial != null)
+            {
+                outlineMaterial.color = Color.white;
+                outlineMaterial.SetFloat("_Metallic", 0f);
+                outlineMaterial.SetFloat("_Smoothness", 0.8f);
+                
+                // Configure outline to ignore occlusion
+                outlineMaterial.renderQueue = 2001; // Even higher than main object
+                outlineMaterial.SetInt("_ZWrite", 0); // Don't write to depth buffer
+                outlineMaterial.SetInt("_ZTest", 0); // Always pass depth test
+            }
         }
 
         // Remove outline collider
@@ -450,11 +539,13 @@ public class AprilTagSceneSetup : MonoBehaviour
         var controller = FindFirstObjectByType<AprilTagController>();
         var ui = FindFirstObjectByType<AprilTagPermissionUI>();
         var webCamManager = FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
+        var envRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
         
         Debug.Log($"Permissions Manager: {(manager != null ? "✓ Found" : "✗ Missing")}");
         Debug.Log($"AprilTag Controller: {(controller != null ? "✓ Found" : "✗ Missing")}");
         Debug.Log($"Permission UI: {(ui != null ? "✓ Found" : "✗ Missing")}");
         Debug.Log($"WebCam Manager: {(webCamManager != null ? "✓ Found" : "✗ Missing")}");
+        Debug.Log($"Environment Raycast Manager: {(envRaycastManager != null ? "✓ Found" : "✗ Missing")}");
         
         // Check if controller is connected to WebCam Manager
         if (controller != null && webCamManager != null)
@@ -464,6 +555,22 @@ public class AprilTagSceneSetup : MonoBehaviour
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var connectedManager = webCamManagerField?.GetValue(controller);
             Debug.Log($"Controller-WebCam Connection: {(connectedManager != null ? "✓ Connected" : "✗ Not Connected")}");
+        }
+        
+        // Check Quest-specific settings
+        if (controller != null)
+        {
+            var controllerType = typeof(AprilTagController);
+            var usePassthroughRaycastingField = controllerType.GetField("usePassthroughRaycasting", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var environmentRaycastManagerField = controllerType.GetField("environmentRaycastManager", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            var usePassthroughRaycasting = (bool)usePassthroughRaycastingField?.GetValue(controller);
+            var connectedEnvRaycastManager = environmentRaycastManagerField?.GetValue(controller);
+            
+            Debug.Log($"Passthrough Raycasting: {(usePassthroughRaycasting ? "✓ Enabled" : "✗ Disabled")}");
+            Debug.Log($"Controller-EnvironmentRaycast Connection: {(connectedEnvRaycastManager != null ? "✓ Connected" : "✗ Not Connected")}");
         }
         
         if (manager != null)
@@ -550,6 +657,163 @@ public class AprilTagSceneSetup : MonoBehaviour
         }
         
         Debug.Log("[AprilTagSceneSetup] WebCamTextureManager reinitialization completed. Check console for results.");
+    }
+
+    [ContextMenu("Setup Quest-Specific Features")]
+    public void SetupQuestSpecificFeatures()
+    {
+        Debug.Log("[AprilTagSceneSetup] Setting up Quest-specific features...");
+
+        // Setup Environment Raycast Manager
+        if (createEnvironmentRaycastManager)
+        {
+            SetupEnvironmentRaycastManager();
+        }
+
+        // Auto-find Environment Raycast Manager if needed
+        if (autoFindEnvironmentRaycastManager && environmentRaycastManager == null)
+        {
+            environmentRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
+            if (environmentRaycastManager != null)
+            {
+                Debug.Log($"[AprilTagSceneSetup] Auto-found EnvironmentRaycastManager: {environmentRaycastManager.name}");
+            }
+        }
+
+        // Update AprilTag Controller with Quest settings
+        UpdateAprilTagControllerWithQuestSettings();
+
+        Debug.Log("[AprilTagSceneSetup] Quest-specific features setup complete!");
+    }
+
+    private void SetupEnvironmentRaycastManager()
+    {
+        var existingManager = FindFirstObjectByType<EnvironmentRaycastManager>();
+        if (existingManager == null)
+        {
+            if (createSimpleEnvironmentRaycastManager)
+            {
+                // Create a simple Environment Raycast Manager
+                var managerGO = new GameObject("EnvironmentRaycastManager");
+                environmentRaycastManager = managerGO.AddComponent<EnvironmentRaycastManager>();
+                
+                Debug.Log("[AprilTagSceneSetup] Created simple EnvironmentRaycastManager");
+            }
+            else
+            {
+                Debug.LogWarning("[AprilTagSceneSetup] No EnvironmentRaycastManager found and createSimpleEnvironmentRaycastManager is disabled. Please add one manually or enable createSimpleEnvironmentRaycastManager.");
+            }
+        }
+        else
+        {
+            environmentRaycastManager = existingManager;
+            Debug.Log($"[AprilTagSceneSetup] Found existing EnvironmentRaycastManager: {existingManager.name}");
+        }
+    }
+
+    private void UpdateAprilTagControllerWithQuestSettings()
+    {
+        var controller = FindFirstObjectByType<AprilTagController>();
+        if (controller == null)
+        {
+            Debug.LogWarning("[AprilTagSceneSetup] No AprilTagController found to update with Quest settings");
+            return;
+        }
+
+        // Update Quest-specific settings using reflection
+        var controllerType = typeof(AprilTagController);
+        var usePassthroughRaycastingField = controllerType.GetField("usePassthroughRaycasting", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var environmentRaycastManagerField = controllerType.GetField("environmentRaycastManager", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        usePassthroughRaycastingField?.SetValue(controller, enablePassthroughRaycasting);
+        environmentRaycastManagerField?.SetValue(controller, environmentRaycastManager);
+
+        Debug.Log($"[AprilTagSceneSetup] Updated AprilTagController with Quest settings - Passthrough Raycasting: {enablePassthroughRaycasting}, EnvironmentRaycastManager: {(environmentRaycastManager != null ? environmentRaycastManager.name : "None")}");
+    }
+
+    [ContextMenu("Setup Environment Raycast Manager Only")]
+    public void SetupEnvironmentRaycastManagerOnly()
+    {
+        Debug.Log("[AprilTagSceneSetup] Setting up Environment Raycast Manager...");
+        SetupEnvironmentRaycastManager();
+        Debug.Log("[AprilTagSceneSetup] Environment Raycast Manager setup complete!");
+    }
+
+    [ContextMenu("Test Quest Setup")]
+    public void TestQuestSetup()
+    {
+        Debug.Log("=== Quest Setup Test ===");
+        
+        var controller = FindFirstObjectByType<AprilTagController>();
+        var webCamManager = FindFirstObjectByType<WebCamTextureManager>();
+        var envRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
+        
+        Debug.Log($"AprilTag Controller: {(controller != null ? "✓ Found" : "✗ Missing")}");
+        Debug.Log($"WebCam Manager: {(webCamManager != null ? "✓ Found" : "✗ Missing")}");
+        Debug.Log($"Environment Raycast Manager: {(envRaycastManager != null ? "✓ Found" : "✗ Missing")}");
+        
+        if (controller != null)
+        {
+            var controllerType = typeof(AprilTagController);
+            var usePassthroughRaycastingField = controllerType.GetField("usePassthroughRaycasting", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var usePassthroughRaycasting = (bool)usePassthroughRaycastingField?.GetValue(controller);
+            Debug.Log($"Passthrough Raycasting Enabled: {usePassthroughRaycasting}");
+        }
+        
+        Debug.Log("=== End Test ===");
+    }
+
+    [ContextMenu("Configure Optimal Quest Settings")]
+    public void ConfigureOptimalQuestSettings()
+    {
+        Debug.Log("[AprilTagSceneSetup] Configuring optimal Quest settings...");
+        
+        // Set optimal Quest-specific settings
+        useCenterEyeTransform = true;
+        enablePassthroughRaycasting = true;
+        autoFindEnvironmentRaycastManager = true;
+        createSimpleEnvironmentRaycastManager = true;
+        enableIPDCompensation = true;
+        usePassthroughRaycasting = true;
+        ignoreOcclusion = true;
+        
+        // Set optimal detection settings for Quest
+        decimate = 2; // Good balance of performance and accuracy
+        maxDetectionsPerSecond = 15f; // Reasonable for Quest performance
+        horizontalFovDeg = 78f; // Quest's typical FOV
+        
+        // Set optimal WebCam settings
+        cameraEye = PassthroughCameraSamples.PassthroughCameraEye.Left; // Default to left eye
+        requestedResolution = new Vector2Int(0, 0); // Use highest available resolution
+        
+        Debug.Log("[AprilTagSceneSetup] Optimal Quest settings configured!");
+        Debug.Log("  - Center Eye Transform: Enabled");
+        Debug.Log("  - Passthrough Raycasting: Enabled");
+        Debug.Log("  - Auto-find Environment Raycast Manager: Enabled");
+        Debug.Log("  - IPD Compensation: Enabled");
+        Debug.Log("  - Ignore Occlusion: Enabled");
+        Debug.Log("  - Decimation: 2");
+        Debug.Log("  - Max Detections/sec: 15");
+        Debug.Log("  - FOV: 78 degrees");
+        Debug.Log("  - Camera Eye: Left");
+        Debug.Log("  - Resolution: Highest available");
+    }
+
+    [ContextMenu("Quick Quest Setup")]
+    public void QuickQuestSetup()
+    {
+        Debug.Log("[AprilTagSceneSetup] Starting quick Quest setup...");
+        
+        // Configure optimal settings first
+        ConfigureOptimalQuestSettings();
+        
+        // Run the complete setup
+        SetupCompleteAprilTagSystem();
+        
+        Debug.Log("[AprilTagSceneSetup] Quick Quest setup complete! Your AprilTag system is ready for Quest.");
     }
 
 }
