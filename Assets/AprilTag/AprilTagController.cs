@@ -76,9 +76,16 @@ public class AprilTagController : MonoBehaviour
     [SerializeField] private bool logDetections = true;
     [Tooltip("Log system debug information (reduced frequency for performance)")]
     [SerializeField] private bool logDebugInfo = true;
+    [Tooltip("Enable all debug logging (can be toggled at runtime)")]
+    [SerializeField] private bool enableAllDebugLogging = true;
 
     // CPU buffers
     private Color32[] _rgba;
+    
+    // Headset pose tracking for continuous adjustment
+    private Quaternion _lastHeadsetRotation = Quaternion.identity;
+    private Vector3 _lastHeadsetPosition = Vector3.zero;
+    private bool _headsetPoseInitialized = false;
 
     // Detector (recreated when size/decimate changes)
     private TagDetector _detector;
@@ -246,7 +253,7 @@ public class AprilTagController : MonoBehaviour
                 Debug.LogWarning($"[AprilTag] Tag {t.ID}: No corner center found, using fallback positioning");
             }
             
-            if (logDetections) 
+            if (enableAllDebugLogging && logDetections) 
             {
                 if (usePassthroughRaycasting)
                 {
@@ -286,14 +293,15 @@ public class AprilTagController : MonoBehaviour
                 worldPosition = GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t);
                 worldRotation = GetWorldRotation(t.Rotation, worldPosition);
                 
-                if (logDebugInfo && detectedCount != _previousTagCount)
+                if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
                 {
                     Debug.Log($"[AprilTag] Tag {t.ID}: Using corner-based positioning at {worldPosition}, corner center: {cornerCenterResult.Value}");
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Corner-based - Raw AprilTag pose: {t.Position}, {t.Rotation.eulerAngles}");
                 }
             }
             else
             {
-                if (logDebugInfo && detectedCount != _previousTagCount)
+                if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
                 {
                     Debug.Log($"[AprilTag] Tag {t.ID}: Corner-based positioning failed, falling back to direct pose");
                 }
@@ -316,17 +324,30 @@ public class AprilTagController : MonoBehaviour
                 worldPosition = cam.position + cam.rotation * adjustedPosition;
                 worldRotation = GetWorldRotation(t.Rotation, worldPosition);
                 
-                if (logDebugInfo && detectedCount != _previousTagCount)
+                if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
                 {
+                    var camRef = GetCorrectCameraReference();
+                    var offsetTagPosition = camRef.position + camRef.rotation * t.Position;
+                    var offsetTagRotation = camRef.rotation * t.Rotation;
+                    
                     Debug.Log($"[AprilTag] Tag {t.ID}: Using direct pose positioning at {worldPosition}, AprilTag pos: {t.Position}, adjusted pos: {adjustedPosition}");
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Direct pose - Raw: {t.Position}, {t.Rotation.eulerAngles}");
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Direct pose - Offset: {offsetTagPosition}, {offsetTagRotation.eulerAngles}");
                 }
             }
             
-            if (logDebugInfo && detectedCount != _previousTagCount)
+            if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
             {
+                var camDebug = GetCorrectCameraReference();
+                var rawTagPosition = t.Position;
+                var rawTagRotation = t.Rotation;
+                var offsetTagPosition = camDebug.position + camDebug.rotation * rawTagPosition;
+                var offsetTagRotation = camDebug.rotation * rawTagRotation;
+                
                 Debug.Log($"[AprilTag] Tag {t.ID}: Final world position={worldPosition}, rotation={worldRotation.eulerAngles}");
-                Debug.Log($"[AprilTag] Tag {t.ID}: AprilTag pose - Position: {t.Position}, Rotation: {t.Rotation.eulerAngles}");
-                Debug.Log($"[AprilTag] Tag {t.ID}: Camera - Position: {GetCorrectCameraReference().position}, Rotation: {GetCorrectCameraReference().rotation.eulerAngles}");
+                Debug.Log($"[AprilTag] Tag {t.ID}: Raw AprilTag pose - Position: {rawTagPosition}, Rotation: {rawTagRotation.eulerAngles}");
+                Debug.Log($"[AprilTag] Tag {t.ID}: Offset by headset - Position: {offsetTagPosition}, Rotation: {offsetTagRotation.eulerAngles}");
+                Debug.Log($"[AprilTag] Tag {t.ID}: Camera - Position: {camDebug.position}, Rotation: {camDebug.rotation.eulerAngles}");
             }
             
             tr.SetPositionAndRotation(worldPosition, worldRotation);
@@ -917,6 +938,22 @@ public class AprilTagController : MonoBehaviour
             Debug.Log($"[AprilTag] Passthrough raycasting: {usePassthroughRaycasting}");
         }
         
+        // Press right controller A button to toggle all debug logging
+        if (OVRInput.GetDown(OVRInput.RawButton.A, OVRInput.Controller.RTouch))
+        {
+            enableAllDebugLogging = !enableAllDebugLogging;
+            logDetections = enableAllDebugLogging;
+            logDebugInfo = enableAllDebugLogging;
+            Debug.Log($"[AprilTag] All debug logging: {enableAllDebugLogging}");
+        }
+        
+        // Press right controller B button to reset headset pose tracking
+        if (OVRInput.GetDown(OVRInput.RawButton.B, OVRInput.Controller.RTouch))
+        {
+            ResetHeadsetPoseTracking();
+            Debug.Log($"[AprilTag] Reset headset pose tracking");
+        }
+        
         // Press B button to toggle improved intrinsics
         if (OVRInput.GetDown(OVRInput.RawButton.B))
         {
@@ -1408,30 +1445,57 @@ public class AprilTagController : MonoBehaviour
         }
         else
         {
-            // For normal tags, use the AprilTag rotation directly
-            // This maintains the tag's orientation relative to the world
-            return aprilTagRotation * Quaternion.Euler(rotationOffset);
+            // For normal tags, use headset-relative rotation
+            // This continuously adjusts the cube orientation based on the headset's current pose
+            return GetHeadsetRelativeRotation(aprilTagRotation, tagWorldPosition) * Quaternion.Euler(rotationOffset);
         }
     }
     
-    private Quaternion GetStableWorldRotation(Vector3 tagWorldPosition)
+    private Quaternion GetHeadsetRelativeRotation(Quaternion aprilTagRotation, Vector3 tagWorldPosition)
     {
-        // Calculate a rotation that's truly world-locked and doesn't change with headset pose reset
-        // This ensures the tag always faces the same direction relative to the real world
-        
-        // For wall-mounted tags, we want them to face the camera
-        // This creates a stable orientation that doesn't change with headset pose reset
+        // Get the current headset pose
         var cam = GetCorrectCameraReference();
+        var currentHeadsetRotation = cam.rotation;
+        var currentHeadsetPosition = cam.position;
         
-        // Calculate the direction from the tag to the camera
-        // This gives us a stable reference that's independent of the headset's coordinate system
-        var directionToCamera = (cam.position - tagWorldPosition).normalized;
+        // Initialize headset pose tracking on first frame
+        if (!_headsetPoseInitialized)
+        {
+            _lastHeadsetRotation = currentHeadsetRotation;
+            _lastHeadsetPosition = currentHeadsetPosition;
+            _headsetPoseInitialized = true;
+            
+            if (enableAllDebugLogging && logDebugInfo)
+            {
+                Debug.Log($"[AprilTag] Initialized headset pose tracking - Rotation: {currentHeadsetRotation.eulerAngles}, Position: {currentHeadsetPosition}");
+            }
+        }
         
-        // Create a rotation that faces the tag toward the camera
-        // This ensures the tag is always "flat" against the wall
-        var lookRotation = Quaternion.LookRotation(directionToCamera, Vector3.up);
+        // Calculate the headset's rotation change since last frame
+        var headsetRotationDelta = Quaternion.Inverse(_lastHeadsetRotation) * currentHeadsetRotation;
         
-        return lookRotation;
+        // Apply the headset rotation change to the AprilTag rotation
+        // This keeps the cube orientation consistent with the headset's movement
+        var adjustedRotation = headsetRotationDelta * aprilTagRotation;
+        
+        // Update the last headset pose for next frame
+        _lastHeadsetRotation = currentHeadsetRotation;
+        _lastHeadsetPosition = currentHeadsetPosition;
+        
+        if (enableAllDebugLogging && logDebugInfo)
+        {
+            Debug.Log($"[AprilTag] Headset-relative rotation - AprilTag: {aprilTagRotation.eulerAngles}, Headset Delta: {headsetRotationDelta.eulerAngles}, Adjusted: {adjustedRotation.eulerAngles}");
+        }
+        
+        return adjustedRotation;
+    }
+    
+    private void ResetHeadsetPoseTracking()
+    {
+        // Reset headset pose tracking - useful when the headset pose is reset
+        _headsetPoseInitialized = false;
+        _lastHeadsetRotation = Quaternion.identity;
+        _lastHeadsetPosition = Vector3.zero;
     }
     
     private Quaternion ConvertAprilTagRotationToWorldSpace(Quaternion aprilTagRotation)
