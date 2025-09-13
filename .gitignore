@@ -19,6 +19,7 @@ CrashReports/
 Sysroot/                  # IL2CPP toolchain cache (when exported)
 il2cpp_cache/
 .utmp/                    # Unity temporary files
+passthroughcamera_*/      # Passthrough camera debug folders
 
 # Addressables / SBP build output (keep AddressableAssetsData itself)
 ServerData/
