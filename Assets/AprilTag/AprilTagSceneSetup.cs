@@ -244,71 +244,161 @@ public class AprilTagSceneSetup : MonoBehaviour
 
     private GameObject CreateSimpleTagVisualizationPrefab()
     {
-        // Create a simple cube prefab for tag visualization
-        var prefab = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        prefab.name = "SimpleTagVizPrefab";
+        // Create a wireframe cube prefab for tag visualization
+        var prefab = new GameObject("SimpleTagVizPrefab");
         
-        // Scale it to be small and flat
-        prefab.transform.localScale = new Vector3(0.08f, 0.001f, 0.08f);
         
-        // Make it a bright color for visibility and configure for no occlusion
-        var renderer = prefab.GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            var material = renderer.sharedMaterial;
-            if (material != null)
-            {
-                material.color = Color.green;
-                material.SetFloat("_Metallic", 0f);
-                material.SetFloat("_Smoothness", 0.5f);
-                
-                // Configure to ignore occlusion
-                material.renderQueue = 2000; // High but valid render queue
-                material.SetInt("_ZWrite", 0); // Don't write to depth buffer
-                material.SetInt("_ZTest", 0); // Always pass depth test
-            }
-        }
-
-        // Remove the collider (not needed for visualization)
-        var collider = prefab.GetComponent<Collider>();
-        if (collider != null)
-        {
-            DestroyImmediate(collider);
-        }
-
-        // Add a simple outline effect with a child object
-        var outline = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        outline.name = "Outline";
-        outline.transform.SetParent(prefab.transform);
-        outline.transform.localScale = new Vector3(1.1f, 1f, 1.1f);
-        outline.transform.localPosition = Vector3.zero;
+        // Start with unit scale - will be scaled by tagSizeMeters in positioning logic
+        prefab.transform.localScale = Vector3.one;
         
-        var outlineRenderer = outline.GetComponent<Renderer>();
-        if (outlineRenderer != null)
+        // Create the wireframe cube using LineRenderer
+        var wireframe = CreateWireframeCube(prefab.transform);
+        
+        // Remove any colliders (not needed for visualization)
+        var colliders = prefab.GetComponentsInChildren<Collider>();
+        foreach (var col in colliders)
         {
-            var outlineMaterial = outlineRenderer.sharedMaterial;
-            if (outlineMaterial != null)
-            {
-                outlineMaterial.color = Color.white;
-                outlineMaterial.SetFloat("_Metallic", 0f);
-                outlineMaterial.SetFloat("_Smoothness", 0.8f);
-                
-                // Configure outline to ignore occlusion
-                outlineMaterial.renderQueue = 2001; // Even higher than main object
-                outlineMaterial.SetInt("_ZWrite", 0); // Don't write to depth buffer
-                outlineMaterial.SetInt("_ZTest", 0); // Always pass depth test
-            }
+            if (col != null) DestroyImmediate(col);
         }
 
-        // Remove outline collider
-        var outlineCollider = outline.GetComponent<Collider>();
-        if (outlineCollider != null)
-        {
-            DestroyImmediate(outlineCollider);
-        }
-
-        Debug.Log("[AprilTagSceneSetup] Created simple tag visualization prefab");
+        Debug.Log("[AprilTagSceneSetup] Created wireframe tag visualization prefab");
         return prefab;
+    }
+    
+    private GameObject CreateWireframeCube(Transform parent)
+    {
+        // Create the main wireframe cube
+        var wireframeGO = new GameObject("WireframeCube");
+        wireframeGO.transform.SetParent(parent);
+        wireframeGO.transform.localPosition = Vector3.zero;
+        wireframeGO.transform.localScale = Vector3.one;
+        
+        // Define cube vertices (8 corners)
+        var vertices = new Vector3[]
+        {
+            // Bottom face (red - touching the tag)
+            new Vector3(-0.5f, -0.5f, -0.5f), // 0
+            new Vector3(0.5f, -0.5f, -0.5f),  // 1
+            new Vector3(0.5f, -0.5f, 0.5f),   // 2
+            new Vector3(-0.5f, -0.5f, 0.5f),  // 3
+            
+            // Top face (green - above the tag)
+            new Vector3(-0.5f, 0.5f, -0.5f),  // 4
+            new Vector3(0.5f, 0.5f, -0.5f),   // 5
+            new Vector3(0.5f, 0.5f, 0.5f),    // 6
+            new Vector3(-0.5f, 0.5f, 0.5f)    // 7
+        };
+        
+        // Create LineRenderer for green wireframe (top face and vertical edges)
+        var greenLineRenderer = wireframeGO.AddComponent<LineRenderer>();
+        greenLineRenderer.material = CreateWireframeMaterial(Color.green);
+        greenLineRenderer.startWidth = 0.002f;
+        greenLineRenderer.endWidth = 0.002f;
+        greenLineRenderer.useWorldSpace = false;
+        greenLineRenderer.loop = false;
+        
+        // Green lines: top face + vertical edges
+        var greenLineIndices = new int[]
+        {
+            // Top face (green) - 4 lines  
+            4, 5, 5, 6, 6, 7, 7, 4,
+            // Vertical edges (green) - 4 lines
+            0, 4, 1, 5, 2, 6, 3, 7
+        };
+        
+        // Create green line positions array
+        var greenLinePositions = new Vector3[greenLineIndices.Length];
+        for (int i = 0; i < greenLineIndices.Length; i++)
+        {
+            greenLinePositions[i] = vertices[greenLineIndices[i]];
+        }
+        
+        greenLineRenderer.positionCount = greenLinePositions.Length;
+        greenLineRenderer.SetPositions(greenLinePositions);
+        
+        // Create separate GameObject for red bottom face
+        var bottomGO = new GameObject("BottomFace");
+        bottomGO.transform.SetParent(wireframeGO.transform);
+        bottomGO.transform.localPosition = Vector3.zero;
+        bottomGO.transform.localScale = Vector3.one;
+        
+        var bottomLineRenderer = bottomGO.AddComponent<LineRenderer>();
+        bottomLineRenderer.material = CreateWireframeMaterial(Color.red);
+        bottomLineRenderer.startWidth = 0.003f; // Slightly thicker for bottom
+        bottomLineRenderer.endWidth = 0.003f;
+        bottomLineRenderer.useWorldSpace = false;
+        bottomLineRenderer.loop = false;
+        
+        // Bottom face only (red)
+        var bottomLineIndices = new int[] { 0, 1, 1, 2, 2, 3, 3, 0 };
+        var bottomLinePositions = new Vector3[bottomLineIndices.Length];
+        for (int i = 0; i < bottomLineIndices.Length; i++)
+        {
+            bottomLinePositions[i] = vertices[bottomLineIndices[i]];
+        }
+        
+        bottomLineRenderer.positionCount = bottomLinePositions.Length;
+        bottomLineRenderer.SetPositions(bottomLinePositions);
+        
+        // Create a red dot to mark one of the corners of the AprilTag
+        var dotGO = new GameObject("CornerDot");
+        dotGO.transform.SetParent(wireframeGO.transform);
+        dotGO.transform.localPosition = new Vector3(-0.5f, -0.5f, -0.5f); // Bottom-left corner
+        dotGO.transform.localScale = Vector3.one * 0.1f; // Double size for better visibility
+        
+        // Create a sphere for the dot
+        var dotMesh = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        dotMesh.transform.SetParent(dotGO.transform);
+        dotMesh.transform.localPosition = Vector3.zero;
+        dotMesh.transform.localScale = Vector3.one;
+        
+        // Make it red and configure for no occlusion
+        var dotRenderer = dotMesh.GetComponent<Renderer>();
+        if (dotRenderer != null)
+        {
+            var dotMaterial = CreateWireframeMaterial(Color.red);
+            dotRenderer.material = dotMaterial;
+        }
+        
+        // Remove the collider
+        var dotCollider = dotMesh.GetComponent<Collider>();
+        if (dotCollider != null)
+        {
+            DestroyImmediate(dotCollider);
+        }
+        
+        return wireframeGO;
+    }
+    
+    private Material CreateWireframeMaterial(Color color)
+    {
+        // Create a simple unlit material for wireframe
+        var shader = Shader.Find("Unlit/Color");
+        if (shader == null)
+        {
+            // Fallback to default shader if Unlit/Color is not found
+            shader = Shader.Find("Legacy Shaders/Diffuse");
+        }
+        
+        if (shader == null)
+        {
+            // Final fallback to default material
+            var material = new Material(Shader.Find("Standard"));
+            material.color = color;
+            material.SetFloat("_Metallic", 0f);
+            material.SetFloat("_Smoothness", 0f);
+            return material;
+        }
+        
+        var wireframeMaterial = new Material(shader);
+        wireframeMaterial.color = color;
+        
+        // Configure to ignore occlusion
+        wireframeMaterial.renderQueue = 2000; // High but valid render queue
+        wireframeMaterial.SetInt("_ZWrite", 0); // Don't write to depth buffer
+        wireframeMaterial.SetInt("_ZTest", 0); // Always pass depth test
+        
+        return wireframeMaterial;
     }
 
     private void SetupWebCamManager()

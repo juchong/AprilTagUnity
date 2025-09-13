@@ -258,7 +258,7 @@ public class AprilTagController : MonoBehaviour
                         Debug.Log($"[AprilTag] Using corner-based positioning for tag {t.ID}: cornerCenter={cornerCenter.Value}");
                     }
                     worldPosition = GetWorldPositionFromCornerCenter(cornerCenter.Value, t);
-                    worldRotation = t.Rotation * Quaternion.Euler(rotationOffset);
+                    worldRotation = ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
                 }
                 else
                 {
@@ -267,7 +267,7 @@ public class AprilTagController : MonoBehaviour
                     if (worldPos.HasValue)
                     {
                         worldPosition = worldPos.Value;
-                        worldRotation = t.Rotation * Quaternion.Euler(rotationOffset);
+                        worldRotation = ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
                     }
                     else
                     {
@@ -282,9 +282,10 @@ public class AprilTagController : MonoBehaviour
                             adjustedPosition = adjustedPosition.normalized * scaledDistance;
                         }
                         
-                        // Use camera-space position directly as world position (world-locked)
-                        worldPosition = adjustedPosition;
-                        worldRotation = t.Rotation * Quaternion.Euler(rotationOffset);
+                        // Transform camera-space position to world space
+                        var cam = GetCorrectCameraReference();
+                        worldPosition = cam.position + cam.rotation * adjustedPosition;
+                        worldRotation = ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
                     }
                 }
             }
@@ -301,9 +302,10 @@ public class AprilTagController : MonoBehaviour
                     adjustedPosition = adjustedPosition.normalized * scaledDistance;
                 }
                 
-                // Use camera-space position directly as world position (world-locked)
-                worldPosition = adjustedPosition;
-                worldRotation = t.Rotation * Quaternion.Euler(rotationOffset);
+                // Transform camera-space position to world space
+                var cam = GetCorrectCameraReference();
+                worldPosition = cam.position + cam.rotation * adjustedPosition;
+                worldRotation = ConvertAprilTagRotationToUnity(t.Rotation) * Quaternion.Euler(rotationOffset);
             }
             
             tr.SetPositionAndRotation(worldPosition, worldRotation);
@@ -1019,6 +1021,28 @@ public class AprilTagController : MonoBehaviour
         return new Vector2((float)x, (float)y);
     }
     
+    private Quaternion ConvertAprilTagRotationToUnity(Quaternion aprilTagRotation)
+    {
+        // Convert AprilTag rotation to Unity rotation
+        // AprilTag uses right-handed coordinate system
+        // Unity uses left-handed coordinate system
+        
+        // Apply coordinate system transformation
+        // This handles the Z-axis rotation mapping to X-axis rotation issue
+        var convertedRotation = aprilTagRotation;
+        
+        // Apply 90-degree rotation around X-axis to align coordinate systems
+        var coordinateTransform = Quaternion.Euler(90f, 0f, 0f);
+        convertedRotation = coordinateTransform * convertedRotation;
+        
+        // Additional -90-degree rotation around X-axis to fix red face orientation
+        // This ensures the red face (bottom) touches the tag surface
+        var xAxisTransform = Quaternion.Euler(-90f, 0f, 0f);
+        convertedRotation = convertedRotation * xAxisTransform;
+        
+        return convertedRotation;
+    }
+    
     private Vector2? ExtractCornerCenter(object detection)
     {
         // Extract corner coordinates from the Detection object and calculate center
@@ -1336,7 +1360,7 @@ public class AprilTagController : MonoBehaviour
             // Create ray from screen point
             var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(eye, centerPixel);
             
-            // Use environment raycasting to place object on ground
+            // Use environment raycasting to place object on ground (like the working method)
             if (environmentRaycastManager != null)
             {
                 if (environmentRaycastManager.Raycast(ray, out var hitInfo))
