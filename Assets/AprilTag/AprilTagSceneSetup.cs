@@ -72,6 +72,7 @@ public class AprilTagSceneSetup : MonoBehaviour
     [Tooltip("Save user offset to PlayerPrefs for persistence")]
     [SerializeField] private bool saveUserOffsetToPersistence = true;
 
+
     [Header("WebCam Manager Settings")]
     [SerializeField] private PassthroughCameraSamples.PassthroughCameraEye cameraEye = PassthroughCameraSamples.PassthroughCameraEye.Left;
     [SerializeField] private Vector2Int requestedResolution = new Vector2Int(0, 0); // 0,0 = highest resolution
@@ -217,6 +218,10 @@ public class AprilTagSceneSetup : MonoBehaviour
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var enableQuestDebuggingField = controllerType.GetField("enableQuestDebugging", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            // Quest perspective correction fields
+            var useImprovedIntrinsicsField = controllerType.GetField("useImprovedIntrinsics", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
             tagFamilyField?.SetValue(controller, tagFamily);
             tagSizeField?.SetValue(controller, tagSizeMeters);
@@ -238,6 +243,13 @@ public class AprilTagSceneSetup : MonoBehaviour
             maxDetectionDistanceField?.SetValue(controller, maxDetectionDistance);
             enableDistanceScalingField?.SetValue(controller, enableDistanceScaling);
             enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
+            
+            // Apply Quest-specific fixes for wall-mounted tag parallax
+            usePassthroughRaycastingField?.SetValue(controller, true);
+            useImprovedIntrinsicsField?.SetValue(controller, true);
+            
+            // Use center eye transform for better head angle compensation
+            useCenterEyeTransformField?.SetValue(controller, true);
             
             // Set tuned configuration values
             Vector3 finalCornerOffset = useUserRuntimeOffset ? userRuntimeOffset : cornerPositionOffset;
@@ -855,5 +867,6 @@ public class AprilTagSceneSetup : MonoBehaviour
         SetUserRuntimeOffset(0.05f, 0.02f, 0.08f); // Large calibration
         Debug.Log("[AprilTagSceneSetup] Applied large calibration offset");
     }
+    
 
 }

@@ -3497,7 +3497,7 @@ MonoBehaviour:
   scaleVizToTagSize: 1
   referenceCamera: {fileID: 0}
   positionOffset: {x: 0, y: 0, z: 0}
-  cornerPositionOffset: {x: 0.03, y: 0.01, z: 0}
+  cornerPositionOffset: {x: 0, y: 0, z: 0}
   saveRuntimeOffset: 1
   rotationOffset: {x: 0, y: 0, z: 0}
   useCenterEyeTransform: 1
