@@ -48,6 +48,12 @@ public class AprilTagSceneSetup : MonoBehaviour
     [SerializeField] private bool useCenterEyeTransform = true;
     [SerializeField] private float cameraHeightOffset = 0.0f;
     [SerializeField] private bool enableIPDCompensation = true;
+    
+    [Header("Tuned Configuration (Default Values)")]
+    [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.030f, 0.010f, 0.000f);
+    [SerializeField] private bool enableConfigurationTool = true;
+    [SerializeField] private bool enableAllDebugLogging = false;
+    [SerializeField] private float tunedRotationZ = -225f;
     [SerializeField] private bool usePassthroughRaycasting = true;
     [SerializeField] private bool ignoreOcclusion = true;
     [SerializeField] private float positionScaleFactor = 1.0f;
@@ -185,6 +191,12 @@ public class AprilTagSceneSetup : MonoBehaviour
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var maxDetectionDistanceField = controllerType.GetField("maxDetectionDistance", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableConfigurationToolField = controllerType.GetField("enableConfigurationTool", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableAllDebugLoggingField = controllerType.GetField("enableAllDebugLogging", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var enableDistanceScalingField = controllerType.GetField("enableDistanceScaling", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var enableQuestDebuggingField = controllerType.GetField("enableQuestDebugging", 
@@ -210,6 +222,11 @@ public class AprilTagSceneSetup : MonoBehaviour
             maxDetectionDistanceField?.SetValue(controller, maxDetectionDistance);
             enableDistanceScalingField?.SetValue(controller, enableDistanceScaling);
             enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
+            
+            // Set tuned configuration values
+            cornerPositionOffsetField?.SetValue(controller, cornerPositionOffset);
+            enableConfigurationToolField?.SetValue(controller, enableConfigurationTool);
+            enableAllDebugLoggingField?.SetValue(controller, enableAllDebugLogging);
 
             // Set up tag visualization prefab
             GameObject vizPrefab = tagVizPrefab;

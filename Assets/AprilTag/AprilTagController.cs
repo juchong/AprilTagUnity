@@ -28,6 +28,10 @@ public class AprilTagController : MonoBehaviour
     [SerializeField] private Camera referenceCamera;
     [Tooltip("Offset to apply to tag positions (useful for calibration)")]
     [SerializeField] private Vector3 positionOffset = Vector3.zero;
+    [Tooltip("Additional offset for corner-based positioning to correct alignment")]
+    [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.030f, 0.010f, 0.000f);
+    [Tooltip("Save runtime offset to PlayerPrefs for persistence")]
+    [SerializeField] private bool saveRuntimeOffset = true;
     [Tooltip("Rotation offset to apply to tag rotations (useful for calibration)")]
     [SerializeField] private Vector3 rotationOffset = Vector3.zero;
     [Tooltip("Quest-specific: Use the center eye transform for better positioning")]
@@ -78,6 +82,8 @@ public class AprilTagController : MonoBehaviour
     [SerializeField] private bool logDebugInfo = true;
     [Tooltip("Enable all debug logging (can be toggled at runtime)")]
     [SerializeField] private bool enableAllDebugLogging = true;
+    [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
+    [SerializeField] private bool enableConfigurationTool = true;
 
     // CPU buffers
     private Color32[] _rgba;
@@ -101,6 +107,9 @@ public class AprilTagController : MonoBehaviour
     {
         // Fix Input System issues on startup
         InputSystemFixer.FixAllEventSystems();
+        
+        // Load saved runtime offset
+        LoadRuntimeOffset();
         
         // Subscribe to permission events
         AprilTagPermissionsManager.OnAllPermissionsGranted += OnAllPermissionsGranted;
@@ -290,13 +299,12 @@ public class AprilTagController : MonoBehaviour
             if (cornerCenterResult.HasValue)
             {
                 // Use corner-based positioning which works better with Quest's coordinate system
-                worldPosition = GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t);
+                worldPosition = GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t) + cornerPositionOffset;
                 worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
                 
                 if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
                 {
-                    Debug.Log($"[AprilTag] Tag {t.ID}: Using corner-based positioning at {worldPosition}, corner center: {cornerCenterResult.Value}");
-                    Debug.Log($"[AprilTag] Tag {t.ID}: Corner-based - Raw AprilTag pose: {t.Position}, {t.Rotation.eulerAngles}");
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Position={worldPosition}, Offset={cornerPositionOffset}");
                 }
             }
             else
@@ -338,16 +346,7 @@ public class AprilTagController : MonoBehaviour
             
             if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
             {
-                var camDebug = GetCorrectCameraReference();
-                var rawTagPosition = t.Position;
-                var rawTagRotation = t.Rotation;
-                var offsetTagPosition = camDebug.position + camDebug.rotation * rawTagPosition;
-                var offsetTagRotation = camDebug.rotation * rawTagRotation;
-                
-                Debug.Log($"[AprilTag] Tag {t.ID}: Final world position={worldPosition}, rotation={worldRotation.eulerAngles}");
-                Debug.Log($"[AprilTag] Tag {t.ID}: Raw AprilTag pose - Position: {rawTagPosition}, Rotation: {rawTagRotation.eulerAngles}");
-                Debug.Log($"[AprilTag] Tag {t.ID}: Offset by headset - Position: {offsetTagPosition}, Rotation: {offsetTagRotation.eulerAngles}");
-                Debug.Log($"[AprilTag] Tag {t.ID}: Camera - Position: {camDebug.position}, Rotation: {camDebug.rotation.eulerAngles}");
+                Debug.Log($"[AprilTag] Tag {t.ID}: Final={worldPosition}, Rotation={worldRotation.eulerAngles}");
             }
             
             tr.SetPositionAndRotation(worldPosition, worldRotation);
@@ -917,89 +916,40 @@ public class AprilTagController : MonoBehaviour
         // Quest controller input handling for debugging
         // This allows debugging on the actual headset without inspector access
         
-        // Press X button to toggle debug logging
-        if (OVRInput.GetDown(OVRInput.RawButton.X))
+        if (enableConfigurationTool)
         {
-            logDebugInfo = !logDebugInfo;
-            Debug.Log($"[AprilTag] Debug logging: {logDebugInfo}");
-        }
-        
-        // Press Y button to toggle detection logging
-        if (OVRInput.GetDown(OVRInput.RawButton.Y))
-        {
-            logDetections = !logDetections;
-            Debug.Log($"[AprilTag] Detection logging: {logDetections}");
-        }
-        
-        // Press A button to toggle passthrough raycasting
-        if (OVRInput.GetDown(OVRInput.RawButton.A))
-        {
-            usePassthroughRaycasting = !usePassthroughRaycasting;
-            Debug.Log($"[AprilTag] Passthrough raycasting: {usePassthroughRaycasting}");
-        }
-        
-        // Press right controller A button to toggle all debug logging
-        if (OVRInput.GetDown(OVRInput.RawButton.A, OVRInput.Controller.RTouch))
-        {
-            enableAllDebugLogging = !enableAllDebugLogging;
-            logDetections = enableAllDebugLogging;
-            logDebugInfo = enableAllDebugLogging;
-            Debug.Log($"[AprilTag] All debug logging: {enableAllDebugLogging}");
-        }
-        
-        // Press right controller B button to reset headset pose tracking
-        if (OVRInput.GetDown(OVRInput.RawButton.B, OVRInput.Controller.RTouch))
-        {
-            ResetHeadsetPoseTracking();
-            Debug.Log($"[AprilTag] Reset headset pose tracking");
-        }
-        
-        // Press B button to toggle improved intrinsics
-        if (OVRInput.GetDown(OVRInput.RawButton.B))
-        {
-            useImprovedIntrinsics = !useImprovedIntrinsics;
-            Debug.Log($"[AprilTag] Improved intrinsics: {useImprovedIntrinsics}");
-        }
-        
-        // Press Left Trigger to toggle test mode identity rotation
-        if (OVRInput.GetDown(OVRInput.RawButton.LIndexTrigger))
-        {
-            testModeIdentityRotation = !testModeIdentityRotation;
-            Debug.Log($"[AprilTag] Test mode identity rotation: {testModeIdentityRotation}");
-        }
-        
-        // Press Right Trigger to toggle world-locked rotation
-        if (OVRInput.GetDown(OVRInput.RawButton.RIndexTrigger))
-        {
-            worldLockedRotation = !worldLockedRotation;
-            Debug.Log($"[AprilTag] World-locked rotation: {worldLockedRotation}");
-        }
-        
-        // Press Left Grip to increase visualization scale
-        if (OVRInput.GetDown(OVRInput.RawButton.LHandTrigger))
-        {
-            visualizationScaleMultiplier *= 1.5f;
-            Debug.Log($"[AprilTag] Visualization scale: {visualizationScaleMultiplier:F2}");
-        }
-        
-        // Press Right Grip to decrease visualization scale
-        if (OVRInput.GetDown(OVRInput.RawButton.RHandTrigger))
-        {
-            visualizationScaleMultiplier /= 1.5f;
-            Debug.Log($"[AprilTag] Visualization scale: {visualizationScaleMultiplier:F2}");
-        }
-        
-        // Press Left Thumbstick to toggle force corner-based positioning
-        if (OVRInput.GetDown(OVRInput.RawButton.LThumbstick))
-        {
-            forceCornerBasedPositioning = !forceCornerBasedPositioning;
-            Debug.Log($"[AprilTag] Force corner-based positioning: {forceCornerBasedPositioning}");
-        }
-        
-        // Press Start button to reset all settings
-        if (OVRInput.GetDown(OVRInput.RawButton.Start))
-        {
-            ResetDebugSettings();
+            // Check if right grip is being held
+            bool rightGripHeld = OVRInput.Get(OVRInput.RawButton.RHandTrigger, OVRInput.Controller.RTouch);
+            
+            // Right A button = move cube right (or left if grip is held)
+            if (OVRInput.GetDown(OVRInput.RawButton.A, OVRInput.Controller.RTouch))
+            {
+                if (rightGripHeld)
+                {
+                    cornerPositionOffset += new Vector3(-0.01f, 0f, 0f); // Move left
+                }
+                else
+                {
+                    cornerPositionOffset += new Vector3(0.01f, 0f, 0f); // Move right
+                }
+                SaveRuntimeOffset();
+                Debug.Log($"[AprilTag] Runtime Offset: X={cornerPositionOffset.x:F3}, Y={cornerPositionOffset.y:F3}, Z={cornerPositionOffset.z:F3}");
+            }
+            
+            // Right B button = move cube up (or down if grip is held)
+            if (OVRInput.GetDown(OVRInput.RawButton.B, OVRInput.Controller.RTouch))
+            {
+                if (rightGripHeld)
+                {
+                    cornerPositionOffset += new Vector3(0f, -0.01f, 0f); // Move down
+                }
+                else
+                {
+                    cornerPositionOffset += new Vector3(0f, 0.01f, 0f); // Move up
+                }
+                SaveRuntimeOffset();
+                Debug.Log($"[AprilTag] Runtime Offset: X={cornerPositionOffset.x:F3}, Y={cornerPositionOffset.y:F3}, Z={cornerPositionOffset.z:F3}");
+            }
         }
         
         // Log the current settings every 5 seconds when debugging is enabled
@@ -1634,9 +1584,7 @@ public class AprilTagController : MonoBehaviour
                     
                     if (enableAllDebugLogging && logDebugInfo)
                     {
-                        Debug.Log($"[AprilTag] Corner-based rotation - Normal: {normal}, Tag Rotation: {tagRotation.eulerAngles}, Cube Rotation: {cubeRotation.eulerAngles}");
-                        Debug.Log($"[AprilTag] Corner vectors - v1: {v1}, v2: {v2}, tagUp: {tagUp}");
-                        Debug.Log($"[AprilTag] World corners: {string.Join(", ", worldCorners.Select(c => c.ToString("F3")))}");
+                        Debug.Log($"[AprilTag] Corner-based rotation - Normal: {normal}, Cube Rotation: {cubeRotation.eulerAngles}");
                     }
                     
                     return cubeRotation;
@@ -1667,6 +1615,30 @@ public class AprilTagController : MonoBehaviour
         _headsetPoseInitialized = false;
         _lastHeadsetRotation = Quaternion.identity;
         _lastHeadsetPosition = Vector3.zero;
+    }
+    
+    private void SaveRuntimeOffset()
+    {
+        if (saveRuntimeOffset)
+        {
+            PlayerPrefs.SetFloat("AprilTag_CornerOffset_X", cornerPositionOffset.x);
+            PlayerPrefs.SetFloat("AprilTag_CornerOffset_Y", cornerPositionOffset.y);
+            PlayerPrefs.SetFloat("AprilTag_CornerOffset_Z", cornerPositionOffset.z);
+            PlayerPrefs.Save();
+        }
+    }
+    
+    private void LoadRuntimeOffset()
+    {
+        if (saveRuntimeOffset && PlayerPrefs.HasKey("AprilTag_CornerOffset_X"))
+        {
+            cornerPositionOffset = new Vector3(
+                PlayerPrefs.GetFloat("AprilTag_CornerOffset_X", 0f),
+                PlayerPrefs.GetFloat("AprilTag_CornerOffset_Y", 0f),
+                PlayerPrefs.GetFloat("AprilTag_CornerOffset_Z", 0f)
+            );
+            Debug.Log($"[AprilTag] Loaded runtime offset: {cornerPositionOffset}");
+        }
     }
     
     private Quaternion ConvertAprilTagRotationToWorldSpace(Quaternion aprilTagRotation)
