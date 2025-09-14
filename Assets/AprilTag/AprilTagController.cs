@@ -78,6 +78,26 @@ public class AprilTagController : MonoBehaviour
     [SerializeField] private bool enableAllDebugLogging = true;
     [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
     [SerializeField] private bool enableConfigurationTool = true;
+    
+    [Header("PhotonVision-Inspired Filtering")]
+    [Tooltip("Enable pose smoothing filter (reduces jitter)")]
+    [SerializeField] private bool enablePoseSmoothing = true;
+    [Tooltip("Position smoothing time constant (seconds)")]
+    [SerializeField] private float positionSmoothingTime = 0.1f;
+    [Tooltip("Rotation smoothing time constant (seconds)")]
+    [SerializeField] private float rotationSmoothingTime = 0.15f;
+    [Tooltip("Enable multi-frame validation (rejects inconsistent detections)")]
+    [SerializeField] private bool enableMultiFrameValidation = true;
+    [Tooltip("Number of frames to validate against")]
+    [SerializeField] private int validationFrameCount = 3;
+    [Tooltip("Maximum position deviation for validation (meters)")]
+    [SerializeField] private float maxPositionDeviation = 0.05f;
+    [Tooltip("Maximum rotation deviation for validation (degrees)")]
+    [SerializeField] private float maxRotationDeviation = 15f;
+    [Tooltip("Enable corner quality assessment")]
+    [SerializeField] private bool enableCornerQualityAssessment = true;
+    [Tooltip("Minimum corner quality threshold (0-1)")]
+    [SerializeField] private float minCornerQuality = 0.3f;
 
     // CPU buffers
     private Color32[] _rgba;
@@ -94,6 +114,53 @@ public class AprilTagController : MonoBehaviour
     private float _nextDetectT;
     private readonly Dictionary<int, Transform> _vizById = new();
     private int _previousTagCount = 0;
+    
+    // PhotonVision-inspired filtering data structures
+    [System.Serializable]
+    public class TagDetectionHistory
+    {
+        public Vector3 position;
+        public Quaternion rotation;
+        public float timestamp;
+        public float cornerQuality;
+        public bool isValid;
+        
+        public TagDetectionHistory(Vector3 pos, Quaternion rot, float quality)
+        {
+            position = pos;
+            rotation = rot;
+            timestamp = Time.time;
+            cornerQuality = quality;
+            isValid = true;
+        }
+    }
+    
+    [System.Serializable]
+    public class FilteredTagPose
+    {
+        public Vector3 filteredPosition;
+        public Quaternion filteredRotation;
+        public Vector3 rawPosition;
+        public Quaternion rawRotation;
+        public float lastUpdateTime;
+        public bool isInitialized;
+        
+        public FilteredTagPose()
+        {
+            filteredPosition = Vector3.zero;
+            filteredRotation = Quaternion.identity;
+            rawPosition = Vector3.zero;
+            rawRotation = Quaternion.identity;
+            lastUpdateTime = 0f;
+            isInitialized = false;
+        }
+    }
+    
+    // Detection history for multi-frame validation (PhotonVision approach)
+    private readonly Dictionary<int, Queue<TagDetectionHistory>> _detectionHistory = new();
+    
+    // Filtered poses for smoothing (PhotonVision approach)
+    private readonly Dictionary<int, FilteredTagPose> _filteredPoses = new();
 
     void OnDisable() => DisposeDetector();
 
@@ -338,12 +405,60 @@ public class AprilTagController : MonoBehaviour
                 }
             }
             
-            if (enableAllDebugLogging && detectedCount != _previousTagCount)
+            // PhotonVision-inspired filtering and validation
+            Vector2[] corners = ExtractCornersFromRawDetection(t.ID, rawDetections);
+            float cornerQuality = CalculateCornerQuality(corners);
+            
+            // Check corner quality threshold
+            if (cornerQuality < minCornerQuality)
             {
-                Debug.Log($"[AprilTag] Tag {t.ID}: Final={worldPosition}, Rotation={worldRotation.eulerAngles}");
+                if (enableAllDebugLogging)
+                {
+                    Debug.LogWarning($"[AprilTag] Tag {t.ID} rejected - Corner quality {cornerQuality:F3} < {minCornerQuality:F3}");
+                }
+                continue; // Skip this detection
             }
             
-            tr.SetPositionAndRotation(worldPosition, worldRotation);
+            // Multi-frame validation (PhotonVision approach)
+            if (!ValidateTagDetection(t.ID, worldPosition, worldRotation, cornerQuality))
+            {
+                continue; // Skip this detection - failed validation
+            }
+            
+            // Apply pose smoothing filter (PhotonVision approach)
+            Vector3 finalPosition = worldPosition;
+            Quaternion finalRotation = worldRotation;
+            
+            if (enablePoseSmoothing)
+            {
+                // Initialize or get existing filtered pose
+                if (!_filteredPoses.ContainsKey(t.ID))
+                {
+                    _filteredPoses[t.ID] = new FilteredTagPose();
+                }
+                
+                var filteredPose = _filteredPoses[t.ID];
+                float deltaTime = Time.time - filteredPose.lastUpdateTime;
+                
+                // Apply PhotonVision-inspired temporal filtering
+                finalPosition = FilterTagPosition(worldPosition, filteredPose.filteredPosition, deltaTime, filteredPose.isInitialized);
+                finalRotation = FilterTagRotation(worldRotation, filteredPose.filteredRotation, deltaTime, filteredPose.isInitialized);
+                
+                // Update filtered pose data
+                filteredPose.rawPosition = worldPosition;
+                filteredPose.rawRotation = worldRotation;
+                filteredPose.filteredPosition = finalPosition;
+                filteredPose.filteredRotation = finalRotation;
+                filteredPose.lastUpdateTime = Time.time;
+                filteredPose.isInitialized = true;
+            }
+            
+            if (enableAllDebugLogging && detectedCount != _previousTagCount)
+            {
+                Debug.Log($"[AprilTag] Tag {t.ID}: Raw={worldPosition:F3}, Filtered={finalPosition:F3}, Quality={cornerQuality:F3}");
+            }
+            
+            tr.SetPositionAndRotation(finalPosition, finalRotation);
             if (scaleVizToTagSize) tr.localScale = Vector3.one * tagSizeMeters * visualizationScaleMultiplier;
             tr.gameObject.SetActive(true);
         }
@@ -960,6 +1075,328 @@ public class AprilTagController : MonoBehaviour
         worldLockedRotation = true;
         visualizationScaleMultiplier = 1.0f;
         Debug.Log("[AprilTag] Debug settings reset to defaults");
+    }
+    
+    // PhotonVision-inspired pose filtering implementation
+    // Based on PhotonVision's temporal filtering approach for stable pose estimation
+    private Vector3 FilterTagPosition(Vector3 rawPosition, Vector3 previousPosition, float deltaTime, bool isInitialized)
+    {
+        if (!enablePoseSmoothing || !isInitialized)
+        {
+            return rawPosition;
+        }
+        
+        // Exponential smoothing filter similar to PhotonVision's approach
+        // Uses time-based smoothing factor for frame-rate independence
+        float smoothingFactor = Mathf.Exp(-deltaTime / positionSmoothingTime);
+        
+        // Clamp smoothing factor to prevent instability
+        smoothingFactor = Mathf.Clamp01(smoothingFactor);
+        
+        // Apply exponential smoothing
+        Vector3 filteredPosition = Vector3.Lerp(rawPosition, previousPosition, smoothingFactor);
+        
+        if (enableAllDebugLogging && Time.frameCount % 300 == 0)
+        {
+            Debug.Log($"[AprilTag] Position Filter - Raw: {rawPosition:F3}, Filtered: {filteredPosition:F3}, Factor: {smoothingFactor:F3}");
+        }
+        
+        return filteredPosition;
+    }
+    
+    private Quaternion FilterTagRotation(Quaternion rawRotation, Quaternion previousRotation, float deltaTime, bool isInitialized)
+    {
+        if (!enablePoseSmoothing || !isInitialized)
+        {
+            return rawRotation;
+        }
+        
+        // Spherical linear interpolation for rotation smoothing
+        // Similar to PhotonVision's rotation filtering approach
+        float smoothingFactor = Mathf.Exp(-deltaTime / rotationSmoothingTime);
+        smoothingFactor = Mathf.Clamp01(smoothingFactor);
+        
+        // Use Slerp for smooth rotation interpolation
+        Quaternion filteredRotation = Quaternion.Slerp(rawRotation, previousRotation, smoothingFactor);
+        
+        return filteredRotation;
+    }
+    
+    // PhotonVision-inspired multi-frame validation
+    // Validates detections against recent history to reject outliers
+    private bool ValidateTagDetection(int tagId, Vector3 position, Quaternion rotation, float cornerQuality)
+    {
+        if (!enableMultiFrameValidation)
+        {
+            return true;
+        }
+        
+        // Initialize history queue if needed
+        if (!_detectionHistory.ContainsKey(tagId))
+        {
+            _detectionHistory[tagId] = new Queue<TagDetectionHistory>();
+        }
+        
+        var history = _detectionHistory[tagId];
+        
+        // If we don't have enough history, accept the detection
+        if (history.Count < 2)
+        {
+            history.Enqueue(new TagDetectionHistory(position, rotation, cornerQuality));
+            
+            // Limit history size (PhotonVision approach)
+            while (history.Count > validationFrameCount)
+            {
+                history.Dequeue();
+            }
+            
+            return true;
+        }
+        
+        // Calculate average position and rotation from recent history
+        Vector3 avgPosition = Vector3.zero;
+        Vector3 avgEulerAngles = Vector3.zero;
+        int validCount = 0;
+        
+        foreach (var detection in history)
+        {
+            if (detection.isValid && (Time.time - detection.timestamp) < 1.0f) // Only use recent detections
+            {
+                avgPosition += detection.position;
+                avgEulerAngles += detection.rotation.eulerAngles;
+                validCount++;
+            }
+        }
+        
+        if (validCount == 0)
+        {
+            return true; // No valid history, accept detection
+        }
+        
+        avgPosition /= validCount;
+        avgEulerAngles /= validCount;
+        
+        // Check position deviation (PhotonVision's consistency check approach)
+        float positionDeviation = Vector3.Distance(position, avgPosition);
+        if (positionDeviation > maxPositionDeviation)
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Tag {tagId} rejected - Position deviation: {positionDeviation:F3}m > {maxPositionDeviation:F3}m");
+            }
+            return false;
+        }
+        
+        // Check rotation deviation
+        Vector3 currentEuler = rotation.eulerAngles;
+        float rotationDeviation = Mathf.Max(
+            Mathf.Abs(Mathf.DeltaAngle(currentEuler.x, avgEulerAngles.x)),
+            Mathf.Abs(Mathf.DeltaAngle(currentEuler.y, avgEulerAngles.y)),
+            Mathf.Abs(Mathf.DeltaAngle(currentEuler.z, avgEulerAngles.z))
+        );
+        
+        if (rotationDeviation > maxRotationDeviation)
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Tag {tagId} rejected - Rotation deviation: {rotationDeviation:F1}° > {maxRotationDeviation:F1}°");
+            }
+            return false;
+        }
+        
+        // Detection passed validation, add to history
+        history.Enqueue(new TagDetectionHistory(position, rotation, cornerQuality));
+        
+        // Limit history size
+        while (history.Count > validationFrameCount)
+        {
+            history.Dequeue();
+        }
+        
+        return true;
+    }
+    
+    // PhotonVision-inspired corner quality assessment
+    // Analyzes corner sharpness and geometric consistency
+    private float CalculateCornerQuality(Vector2[] corners)
+    {
+        if (!enableCornerQualityAssessment || corners == null || corners.Length != 4)
+        {
+            return 1.0f; // Default quality if assessment disabled
+        }
+        
+        float quality = 1.0f;
+        
+        // Check geometric consistency (PhotonVision approach)
+        // Measure how close the corners are to forming a proper quadrilateral
+        
+        // Calculate side lengths
+        float[] sideLengths = new float[4];
+        for (int i = 0; i < 4; i++)
+        {
+            int nextIndex = (i + 1) % 4;
+            sideLengths[i] = Vector2.Distance(corners[i], corners[nextIndex]);
+        }
+        
+        // Check for degenerate cases (very small or very large sides)
+        float minSide = Mathf.Min(sideLengths);
+        float maxSide = Mathf.Max(sideLengths);
+        
+        if (minSide < 5.0f) // Too small in pixels
+        {
+            quality *= 0.3f;
+        }
+        
+        if (maxSide > 500.0f) // Too large, likely false detection
+        {
+            quality *= 0.5f;
+        }
+        
+        // Check aspect ratio consistency (should be roughly square for AprilTags)
+        float aspectRatio = maxSide / Mathf.Max(minSide, 0.1f);
+        if (aspectRatio > 3.0f) // Too elongated
+        {
+            quality *= 0.4f;
+        }
+        
+        // Check corner angles (should be close to 90 degrees for AprilTags)
+        float totalAngleDeviation = 0f;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2 prev = corners[(i + 3) % 4];
+            Vector2 curr = corners[i];
+            Vector2 next = corners[(i + 1) % 4];
+            
+            Vector2 v1 = (prev - curr).normalized;
+            Vector2 v2 = (next - curr).normalized;
+            
+            float angle = Vector2.Angle(v1, v2);
+            float angleDeviation = Mathf.Abs(angle - 90f);
+            totalAngleDeviation += angleDeviation;
+        }
+        
+        float avgAngleDeviation = totalAngleDeviation / 4f;
+        if (avgAngleDeviation > 30f) // Corners too far from 90 degrees
+        {
+            quality *= Mathf.Lerp(1.0f, 0.2f, (avgAngleDeviation - 30f) / 60f);
+        }
+        
+        // Check for convexity (corners should form a convex quadrilateral)
+        bool isConvex = true;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2 p1 = corners[i];
+            Vector2 p2 = corners[(i + 1) % 4];
+            Vector2 p3 = corners[(i + 2) % 4];
+            
+            // Cross product to check turn direction
+            float cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+            if (i == 0)
+            {
+                // Set expected sign
+            }
+            else if ((cross > 0) != (i % 2 == 1))
+            {
+                isConvex = false;
+                break;
+            }
+        }
+        
+        if (!isConvex)
+        {
+            quality *= 0.3f;
+        }
+        
+        // Clamp quality to valid range
+        quality = Mathf.Clamp01(quality);
+        
+        if (enableAllDebugLogging && Time.frameCount % 180 == 0) // Log every 3 seconds
+        {
+            Debug.Log($"[AprilTag] Corner Quality Assessment - Quality: {quality:F3}, AspectRatio: {aspectRatio:F2}, AngleDeviation: {avgAngleDeviation:F1}°, Convex: {isConvex}");
+        }
+        
+        return quality;
+    }
+    
+    // Extract corner coordinates from raw detection data (PhotonVision approach)
+    private Vector2[] ExtractCornersFromRawDetection(int tagId, List<object> rawDetections)
+    {
+        if (rawDetections == null || rawDetections.Count == 0)
+        {
+            return null;
+        }
+        
+        try
+        {
+            // Look for detection with matching ID
+            foreach (var detection in rawDetections)
+            {
+                if (detection == null) continue;
+                
+                var detectionType = detection.GetType();
+                
+                // Try to get ID field
+                var idField = detectionType.GetField("ID") ?? detectionType.GetField("id");
+                if (idField != null)
+                {
+                    var detectionId = idField.GetValue(detection);
+                    if (detectionId != null && detectionId.Equals(tagId))
+                    {
+                        // Found matching detection, extract corners
+                        var cornersField = detectionType.GetField("Corners") ?? 
+                                         detectionType.GetField("corners") ??
+                                         detectionType.GetField("Corner") ??
+                                         detectionType.GetField("corner");
+                        
+                        if (cornersField != null)
+                        {
+                            var cornersValue = cornersField.GetValue(detection);
+                            if (cornersValue is Vector2[] corners)
+                            {
+                                return corners;
+                            }
+                            else if (cornersValue is Array cornerArray && cornerArray.Length >= 4)
+                            {
+                                // Convert to Vector2 array
+                                Vector2[] convertedCorners = new Vector2[4];
+                                for (int i = 0; i < 4 && i < cornerArray.Length; i++)
+                                {
+                                    var corner = cornerArray.GetValue(i);
+                                    if (corner is Vector2 v2)
+                                    {
+                                        convertedCorners[i] = v2;
+                                    }
+                                    else
+                                    {
+                                        // Try to extract x, y fields
+                                        var cornerType = corner.GetType();
+                                        var xField = cornerType.GetField("x") ?? cornerType.GetField("X");
+                                        var yField = cornerType.GetField("y") ?? cornerType.GetField("Y");
+                                        
+                                        if (xField != null && yField != null)
+                                        {
+                                            float x = Convert.ToSingle(xField.GetValue(corner));
+                                            float y = Convert.ToSingle(yField.GetValue(corner));
+                                            convertedCorners[i] = new Vector2(x, y);
+                                        }
+                                    }
+                                }
+                                return convertedCorners;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (enableAllDebugLogging && Time.frameCount % 300 == 0)
+            {
+                Debug.LogWarning($"[AprilTag] Failed to extract corners for tag {tagId}: {ex.Message}");
+            }
+        }
+        
+        return null;
     }
     
     

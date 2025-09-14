@@ -218,6 +218,14 @@ public class AprilTagSceneSetup : MonoBehaviour
             var enableQuestDebuggingField = controllerType.GetField("enableQuestDebugging", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             
+            // PhotonVision-inspired filtering fields
+            var enablePoseSmoothingField = controllerType.GetField("enablePoseSmoothing", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableMultiFrameValidationField = controllerType.GetField("enableMultiFrameValidation", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableCornerQualityAssessmentField = controllerType.GetField("enableCornerQualityAssessment", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
             // Quest perspective correction fields
             var useImprovedIntrinsicsField = controllerType.GetField("useImprovedIntrinsics", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -242,6 +250,11 @@ public class AprilTagSceneSetup : MonoBehaviour
             maxDetectionDistanceField?.SetValue(controller, maxDetectionDistance);
             enableDistanceScalingField?.SetValue(controller, enableDistanceScaling);
             enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
+            
+            // Apply PhotonVision-inspired filtering settings (enabled by default for better accuracy)
+            enablePoseSmoothingField?.SetValue(controller, true);
+            enableMultiFrameValidationField?.SetValue(controller, true);
+            enableCornerQualityAssessmentField?.SetValue(controller, true);
             
             // Apply Quest-specific fixes for wall-mounted tag parallax
             usePassthroughRaycastingField?.SetValue(controller, true);
