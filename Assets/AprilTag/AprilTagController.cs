@@ -29,7 +29,7 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Offset to apply to tag positions (useful for calibration)")]
     [SerializeField] private Vector3 positionOffset = Vector3.zero;
     [Tooltip("Additional offset for corner-based positioning to correct alignment")]
-    [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.030f, 0.010f, 0.000f);
+    [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.000f, 0.000f, 0.000f);
     [Tooltip("Save runtime offset to PlayerPrefs for persistence")]
     [SerializeField] private bool saveRuntimeOffset = true;
     [Tooltip("Rotation offset to apply to tag rotations (useful for calibration)")]
@@ -60,26 +60,20 @@ public class AprilTagController : MonoBehaviour
     [SerializeField] private float visualizationScaleMultiplier = 1.0f;
     [Tooltip("Test mode: Use identity rotation to see if positioning is correct")]
     [SerializeField] private bool testModeIdentityRotation = false;
-    [Tooltip("Force use of corner-based positioning (disable fallback)")]
-    [SerializeField] private bool forceCornerBasedPositioning = false;
 
     [Header("Detection")]
     [Tooltip("Tag family to detect. Tag36h11 is recommended for ArUcO compatibility.")]
     [SerializeField] private AprilTag.Interop.TagFamily tagFamily = AprilTag.Interop.TagFamily.Tag36h11;
     [Tooltip("Physical tag edge length (meters).")]
-    [SerializeField] private float tagSizeMeters = 0.08f;
+    [SerializeField] private float tagSizeMeters = 0.165f;
     [Tooltip("Downscale factor for detection (1 = full res, 2 = half, etc.).")]
     [Range(1, 8)][SerializeField] private int decimate = 2;
     [Tooltip("Max detection updates per second.")]
-    [SerializeField] private float maxDetectionsPerSecond = 15f;
+    [SerializeField] private float maxDetectionsPerSecond = 72f;
     [Tooltip("Horizontal FOV (degrees) of the passthrough camera.")]
     [SerializeField] private float horizontalFovDeg = 78f;
 
     [Header("Diagnostics")]
-    [Tooltip("Log individual tag detection details (position, euler angles, quaternions)")]
-    [SerializeField] private bool logDetections = true;
-    [Tooltip("Log system debug information (reduced frequency for performance)")]
-    [SerializeField] private bool logDebugInfo = true;
     [Tooltip("Enable all debug logging (can be toggled at runtime)")]
     [SerializeField] private bool enableAllDebugLogging = true;
     [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
@@ -120,7 +114,7 @@ public class AprilTagController : MonoBehaviour
         if (environmentRaycastManager == null && usePassthroughRaycasting)
         {
             environmentRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
-            if (environmentRaycastManager == null && logDebugInfo)
+            if (environmentRaycastManager == null && enableAllDebugLogging)
             {
                 Debug.LogWarning("[AprilTag] No EnvironmentRaycastManager found. Passthrough raycasting will not work properly. Please assign one or disable usePassthroughRaycasting.");
             }
@@ -139,13 +133,13 @@ public class AprilTagController : MonoBehaviour
     
     private void OnAllPermissionsGranted()
     {
-        if (logDebugInfo) Debug.Log("[AprilTag] All required permissions granted - ready to start detection");
+        if (enableAllDebugLogging) Debug.Log("[AprilTag] All required permissions granted - ready to start detection");
         // Permissions are now available, detection will start automatically in Update()
     }
     
     private void OnPermissionsDenied()
     {
-        if (logDebugInfo) Debug.LogWarning("[AprilTag] Required permissions denied - detection will not work properly");
+        if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] Required permissions denied - detection will not work properly");
         // Could show UI message to user here
     }
 
@@ -161,7 +155,7 @@ public class AprilTagController : MonoBehaviour
         if (!AprilTagPermissionsManager.HasAllPermissions)
         {
             // Only log this warning occasionally to avoid spam
-            if (logDebugInfo && Time.frameCount % 300 == 0) 
+            if (enableAllDebugLogging && Time.frameCount % 300 == 0) 
             {
                 Debug.LogWarning("[AprilTag] Waiting for required permissions to be granted");
             }
@@ -171,19 +165,19 @@ public class AprilTagController : MonoBehaviour
         var wct = GetActiveWebCamTexture();
         if (wct == null)
         {
-            if (logDebugInfo) Debug.LogWarning("[AprilTag] No WebCamTexture available");
+            if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] No WebCamTexture available");
             return;
         }
         
         if (!wct.isPlaying)
         {
-            if (logDebugInfo) Debug.LogWarning("[AprilTag] WebCamTexture is not playing");
+            if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] WebCamTexture is not playing");
             return;
         }
         
         if (wct.width <= 16 || wct.height <= 16)
         {
-            if (logDebugInfo) Debug.LogWarning($"[AprilTag] WebCamTexture dimensions too small: {wct.width}x{wct.height}");
+            if (enableAllDebugLogging) Debug.LogWarning($"[AprilTag] WebCamTexture dimensions too small: {wct.width}x{wct.height}");
             return;
         }
 
@@ -201,7 +195,7 @@ public class AprilTagController : MonoBehaviour
         // Ensure detector matches the feed dimensions
         if (_detector == null || _detW != wct.width || _detH != wct.height || _detDecim != decimate)
         {
-            if (logDebugInfo) Debug.Log($"[AprilTag] Recreating detector: {wct.width}x{wct.height}, decimate={decimate}");
+            if (enableAllDebugLogging) Debug.Log($"[AprilTag] Recreating detector: {wct.width}x{wct.height}, decimate={decimate}");
             RecreateDetectorIfNeeded(wct.width, wct.height, decimate);
         }
 
@@ -211,13 +205,13 @@ public class AprilTagController : MonoBehaviour
             _rgba = wct.GetPixels32();
             if (_rgba == null || _rgba.Length == 0)
             {
-                if (logDebugInfo && Time.frameCount % 300 == 0) Debug.LogWarning("[AprilTag] WebCamTexture returned no pixel data");
+                if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning("[AprilTag] WebCamTexture returned no pixel data");
                 return;
             }
         }
         catch (System.Exception ex)
         {
-            if (logDebugInfo && Time.frameCount % 300 == 0) Debug.LogWarning($"[AprilTag] Failed to get pixels from WebCamTexture: {ex.Message}");
+            if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning($"[AprilTag] Failed to get pixels from WebCamTexture: {ex.Message}");
             return;
         }
 
@@ -253,16 +247,16 @@ public class AprilTagController : MonoBehaviour
                 cornerCenter = TryGetCornerBasedCenter(t.ID, rawDetections);
             }
             
-            if (logDebugInfo && cornerCenter.HasValue)
+            if (enableAllDebugLogging && cornerCenter.HasValue)
             {
                 Debug.Log($"[AprilTag] Tag {t.ID}: Corner center found at {cornerCenter.Value}");
             }
-            else if (logDebugInfo)
+            else if (enableAllDebugLogging)
             {
                 Debug.LogWarning($"[AprilTag] Tag {t.ID}: No corner center found, using fallback positioning");
             }
             
-            if (enableAllDebugLogging && logDetections) 
+            if (enableAllDebugLogging) 
             {
                 if (usePassthroughRaycasting)
                 {
@@ -302,14 +296,14 @@ public class AprilTagController : MonoBehaviour
                 worldPosition = GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t) + cornerPositionOffset;
                 worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
                 
-                if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
+                if (enableAllDebugLogging && detectedCount != _previousTagCount)
                 {
                     Debug.Log($"[AprilTag] Tag {t.ID}: Position={worldPosition}, Offset={cornerPositionOffset}");
                 }
             }
             else
             {
-                if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
+                if (enableAllDebugLogging && detectedCount != _previousTagCount)
                 {
                     Debug.Log($"[AprilTag] Tag {t.ID}: Corner-based positioning failed, falling back to direct pose");
                 }
@@ -332,7 +326,7 @@ public class AprilTagController : MonoBehaviour
                 worldPosition = cam.position + cam.rotation * adjustedPosition;
                 worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
                 
-                if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
+                if (enableAllDebugLogging && detectedCount != _previousTagCount)
                 {
                     var camRef = GetCorrectCameraReference();
                     var offsetTagPosition = camRef.position + camRef.rotation * t.Position;
@@ -344,7 +338,7 @@ public class AprilTagController : MonoBehaviour
                 }
             }
             
-            if (enableAllDebugLogging && logDebugInfo && detectedCount != _previousTagCount)
+            if (enableAllDebugLogging && detectedCount != _previousTagCount)
             {
                 Debug.Log($"[AprilTag] Tag {t.ID}: Final={worldPosition}, Rotation={worldRotation.eulerAngles}");
             }
@@ -381,7 +375,7 @@ public class AprilTagController : MonoBehaviour
         _detector = new TagDetector(width, height, tagFamily, Mathf.Max(1, dec)); // <� width, height, decimation
         _detW = width; _detH = height; _detDecim = Mathf.Max(1, dec);
         
-        if (logDebugInfo) Debug.Log($"[AprilTag] Created detector: {width}x{height}, family={tagFamily}, decimate={Mathf.Max(1, dec)}");
+        if (enableAllDebugLogging) Debug.Log($"[AprilTag] Created detector: {width}x{height}, family={tagFamily}, decimate={Mathf.Max(1, dec)}");
     }
 
     private void DisposeDetector()
@@ -445,7 +439,7 @@ public class AprilTagController : MonoBehaviour
                 var centerEyeAnchor = cameraRig.centerEyeAnchor;
                 if (centerEyeAnchor != null)
                 {
-                    if (logDebugInfo) Debug.Log($"[AprilTag] Using OVRCameraRig center eye anchor for Quest positioning");
+                    if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using OVRCameraRig center eye anchor for Quest positioning");
                     return centerEyeAnchor;
                 }
             }
@@ -454,7 +448,7 @@ public class AprilTagController : MonoBehaviour
             var xrOrigin = FindFirstObjectByType<Unity.XR.CoreUtils.XROrigin>();
             if (xrOrigin != null && xrOrigin.Camera != null)
             {
-                if (logDebugInfo) Debug.Log($"[AprilTag] Using XR Origin camera for Quest positioning");
+                if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using XR Origin camera for Quest positioning");
                 return xrOrigin.Camera.transform;
             }
         }
@@ -473,7 +467,7 @@ public class AprilTagController : MonoBehaviour
                 cam.name.ToLower().Contains("center") ||
                 cam.name.ToLower().Contains("main"))
             {
-                if (logDebugInfo) Debug.Log($"[AprilTag] Using camera '{cam.name}' as reference for tag positioning");
+                if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using camera '{cam.name}' as reference for tag positioning");
                 return cam.transform;
             }
         }
@@ -489,7 +483,7 @@ public class AprilTagController : MonoBehaviour
                 var cam = cameraField.GetValue(webCamManager) as Camera;
                 if (cam != null)
                 {
-                    if (logDebugInfo) Debug.Log($"[AprilTag] Using WebCam manager camera '{cam.name}' as reference for tag positioning");
+                    if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using WebCam manager camera '{cam.name}' as reference for tag positioning");
                     return cam.transform;
                 }
             }
@@ -497,7 +491,7 @@ public class AprilTagController : MonoBehaviour
 
         // Fallback to Camera.main or this transform
         var fallbackCam = Camera.main ? Camera.main.transform : transform;
-        if (logDebugInfo) Debug.Log($"[AprilTag] Using fallback camera '{fallbackCam.name}' as reference for tag positioning");
+        if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using fallback camera '{fallbackCam.name}' as reference for tag positioning");
         return fallbackCam;
     }
 
@@ -602,7 +596,7 @@ public class AprilTagController : MonoBehaviour
         }
         catch (System.Exception ex)
         {
-            if (logDebugInfo) Debug.LogWarning($"[AprilTag] Passthrough raycasting failed: {ex.Message}");
+            if (enableAllDebugLogging) Debug.LogWarning($"[AprilTag] Passthrough raycasting failed: {ex.Message}");
             return null;
         }
     }
@@ -913,9 +907,7 @@ public class AprilTagController : MonoBehaviour
 
     private void HandleQuestDebugInput()
     {
-        // Quest controller input handling for debugging
-        // This allows debugging on the actual headset without inspector access
-        
+        // Quest controller input handling for runtime calibration
         if (enableConfigurationTool)
         {
             // Check if right grip is being held
@@ -953,36 +945,23 @@ public class AprilTagController : MonoBehaviour
         }
         
         // Log the current settings every 5 seconds when debugging is enabled
-        if (logDebugInfo && Time.frameCount % 300 == 0) // Every 5 seconds at 60fps
+        if (enableAllDebugLogging && Time.frameCount % 300 == 0) // Every 5 seconds at 60fps
         {
             LogCurrentSettings();
-        }
-        
-        // Show current settings on screen every 2 seconds
-        if (logDebugInfo && Time.frameCount % 120 == 0) // Every 2 seconds at 60fps
-        {
-            ShowCurrentSettingsOnScreen();
         }
     }
     
     private void ResetDebugSettings()
     {
-        logDebugInfo = true;
-        logDetections = true;
+        enableAllDebugLogging = true;
         usePassthroughRaycasting = true;
         useImprovedIntrinsics = false;
         testModeIdentityRotation = false;
-        forceCornerBasedPositioning = false;
         worldLockedRotation = true;
         visualizationScaleMultiplier = 1.0f;
         Debug.Log("[AprilTag] Debug settings reset to defaults");
     }
     
-    private void ShowCurrentSettingsOnScreen()
-    {
-        // Show current settings as debug text on screen
-        Debug.Log($"[AprilTag] Current Settings - Scale: {visualizationScaleMultiplier:F2}, TestMode: {testModeIdentityRotation}, WorldLocked: {worldLockedRotation}, Passthrough: {usePassthroughRaycasting}, Intrinsics: {useImprovedIntrinsics}");
-    }
     
     private List<object> GetRawDetections()
     {
@@ -1056,14 +1035,14 @@ public class AprilTagController : MonoBehaviour
                 }
             }
             
-            if (logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.LogWarning("[AprilTag] No raw detection data found - corner detection will not work");
             }
         }
         catch (Exception e)
         {
-            if (logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.LogWarning($"[AprilTag] Error accessing raw detections: {e.Message}");
             }
@@ -1197,7 +1176,7 @@ public class AprilTagController : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        if (logDebugInfo)
+                        if (enableAllDebugLogging)
                         {
                             Debug.LogWarning($"[AprilTag] Error getting {xField} field value: {e.Message}");
                         }
@@ -1216,7 +1195,7 @@ public class AprilTagController : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (logDebugInfo)
+                            if (enableAllDebugLogging)
                             {
                                 Debug.LogWarning($"[AprilTag] Error getting {xField} property value: {e.Message}");
                             }
@@ -1235,7 +1214,7 @@ public class AprilTagController : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        if (logDebugInfo)
+                        if (enableAllDebugLogging)
                         {
                             Debug.LogWarning($"[AprilTag] Error getting {yField} field value: {e.Message}");
                         }
@@ -1254,7 +1233,7 @@ public class AprilTagController : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (logDebugInfo)
+                            if (enableAllDebugLogging)
                             {
                                 Debug.LogWarning($"[AprilTag] Error getting {yField} property value: {e.Message}");
                             }
@@ -1317,7 +1296,7 @@ public class AprilTagController : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (logDebugInfo)
+                            if (enableAllDebugLogging)
                             {
                                 Debug.LogWarning($"[AprilTag] Error with alternative fields {xField}, {yField}: {e.Message}");
                             }
@@ -1341,7 +1320,7 @@ public class AprilTagController : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.LogWarning($"[AprilTag] Error extracting corner center: {e.Message}");
             }
@@ -1418,7 +1397,7 @@ public class AprilTagController : MonoBehaviour
             _lastHeadsetPosition = currentHeadsetPosition;
             _headsetPoseInitialized = true;
             
-            if (enableAllDebugLogging && logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.Log($"[AprilTag] Initialized headset pose tracking - Rotation: {currentHeadsetRotation.eulerAngles}, Position: {currentHeadsetPosition}");
             }
@@ -1435,7 +1414,7 @@ public class AprilTagController : MonoBehaviour
         _lastHeadsetRotation = currentHeadsetRotation;
         _lastHeadsetPosition = currentHeadsetPosition;
         
-        if (enableAllDebugLogging && logDebugInfo)
+        if (enableAllDebugLogging)
         {
             Debug.Log($"[AprilTag] Headset-relative rotation - AprilTag: {aprilTagRotation.eulerAngles}, Headset Delta: {headsetRotationDelta.eulerAngles}, Adjusted: {adjustedRotation.eulerAngles}");
         }
@@ -1472,7 +1451,7 @@ public class AprilTagController : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (enableAllDebugLogging && logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.LogWarning($"[AprilTag] Error calculating corner-based rotation: {e.Message}");
             }
@@ -1510,7 +1489,7 @@ public class AprilTagController : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (enableAllDebugLogging && logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.LogWarning($"[AprilTag] Error extracting corner coordinates: {e.Message}");
             }
@@ -1582,7 +1561,7 @@ public class AprilTagController : MonoBehaviour
                     // This ensures the cube sits flat on the tag surface
                     var cubeRotation = tagRotation * Quaternion.Euler(0f, 0f, -225f);
                     
-                    if (enableAllDebugLogging && logDebugInfo)
+                    if (enableAllDebugLogging)
                     {
                         Debug.Log($"[AprilTag] Corner-based rotation - Normal: {normal}, Cube Rotation: {cubeRotation.eulerAngles}");
                     }
@@ -1591,7 +1570,7 @@ public class AprilTagController : MonoBehaviour
                 }
                 else
                 {
-                    if (enableAllDebugLogging && logDebugInfo)
+                    if (enableAllDebugLogging)
                     {
                         Debug.LogWarning($"[AprilTag] Invalid normal vector from corners - v1: {v1}, v2: {v2}");
                     }
@@ -1599,7 +1578,7 @@ public class AprilTagController : MonoBehaviour
             }
             else
             {
-                if (enableAllDebugLogging && logDebugInfo)
+                if (enableAllDebugLogging)
                 {
                     Debug.LogWarning($"[AprilTag] Invalid corner vectors - v1: {v1}, v2: {v2}");
                 }
@@ -1730,7 +1709,7 @@ public class AprilTagController : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        if (logDebugInfo)
+                        if (enableAllDebugLogging)
                         {
                             Debug.LogWarning($"[AprilTag] Error getting {xField} field value: {e.Message}");
                         }
@@ -1749,7 +1728,7 @@ public class AprilTagController : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (logDebugInfo)
+                            if (enableAllDebugLogging)
                             {
                                 Debug.LogWarning($"[AprilTag] Error getting {xField} property value: {e.Message}");
                             }
@@ -1768,7 +1747,7 @@ public class AprilTagController : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        if (logDebugInfo)
+                        if (enableAllDebugLogging)
                         {
                             Debug.LogWarning($"[AprilTag] Error getting {yField} field value: {e.Message}");
                         }
@@ -1787,7 +1766,7 @@ public class AprilTagController : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (logDebugInfo)
+                            if (enableAllDebugLogging)
                             {
                                 Debug.LogWarning($"[AprilTag] Error getting {yField} property value: {e.Message}");
                             }
@@ -1851,7 +1830,7 @@ public class AprilTagController : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (logDebugInfo)
+                            if (enableAllDebugLogging)
                             {
                                 Debug.LogWarning($"[AprilTag] Error with alternative fields {xField}, {yField}: {e.Message}");
                             }
@@ -1875,7 +1854,7 @@ public class AprilTagController : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.LogWarning($"[AprilTag] Error extracting corner center: {e.Message}");
             }
@@ -1915,7 +1894,7 @@ public class AprilTagController : MonoBehaviour
             {
                 if (environmentRaycastManager.Raycast(ray, out var hitInfo))
                 {
-                    if (logDebugInfo)
+                    if (enableAllDebugLogging)
                     {
                         Debug.Log($"[AprilTag] Corner-based positioning hit at: {hitInfo.point}");
                     }
@@ -1923,7 +1902,7 @@ public class AprilTagController : MonoBehaviour
                 }
                 else
                 {
-                    if (logDebugInfo)
+                    if (enableAllDebugLogging)
                     {
                         Debug.LogWarning("[AprilTag] Corner-based positioning: Environment raycast missed, using fallback");
                     }
@@ -1935,7 +1914,7 @@ public class AprilTagController : MonoBehaviour
             var adjustedPosition = (tagPose.Position + positionOffset) * positionScaleFactor;
             var worldPosition = cam.position + cam.rotation * adjustedPosition;
             
-            if (logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.Log($"[AprilTag] Corner-based positioning fallback: {worldPosition}");
             }
@@ -1944,7 +1923,7 @@ public class AprilTagController : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (logDebugInfo)
+            if (enableAllDebugLogging)
             {
                 Debug.LogWarning($"[AprilTag] Error in corner-based positioning: {e.Message}");
             }

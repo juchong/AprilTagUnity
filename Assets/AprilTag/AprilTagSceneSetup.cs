@@ -33,9 +33,9 @@ public class AprilTagSceneSetup : MonoBehaviour
 
     [Header("AprilTag Detection Settings")]
     [SerializeField] private AprilTag.Interop.TagFamily tagFamily = AprilTag.Interop.TagFamily.Tag36h11;
-    [SerializeField] private float tagSizeMeters = 0.08f;
+    [SerializeField] private float tagSizeMeters = 0.165f;
     [Range(1, 8)][SerializeField] private int decimate = 2;
-    [SerializeField] private float maxDetectionsPerSecond = 15f;
+    [SerializeField] private float maxDetectionsPerSecond = 72f;
     [SerializeField] private float horizontalFovDeg = 78f;
     [SerializeField] private bool scaleVizToTagSize = true;
 
@@ -50,10 +50,9 @@ public class AprilTagSceneSetup : MonoBehaviour
     [SerializeField] private bool enableIPDCompensation = true;
     
     [Header("Tuned Configuration (Default Values)")]
-    [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.030f, 0.010f, 0.000f);
+    [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.000f, 0.000f, 0.000f);
     [SerializeField] private bool enableConfigurationTool = true;
     [SerializeField] private bool enableAllDebugLogging = false;
-    [SerializeField] private float tunedRotationZ = -225f;
     [SerializeField] private bool usePassthroughRaycasting = true;
     [SerializeField] private bool ignoreOcclusion = true;
     [SerializeField] private float positionScaleFactor = 1.0f;
@@ -66,7 +65,7 @@ public class AprilTagSceneSetup : MonoBehaviour
     [Tooltip("Enable user-specified runtime offset (overrides default cornerPositionOffset)")]
     [SerializeField] private bool useUserRuntimeOffset = false;
     [Tooltip("User-measured runtime offset values (X, Y, Z in meters)")]
-    [SerializeField] private Vector3 userRuntimeOffset = new Vector3(0.030f, 0.010f, 0.000f);
+    [SerializeField] private Vector3 userRuntimeOffset = new Vector3(0.000f, 0.000f, 0.000f);
     [Tooltip("Apply user offset immediately when setting up the controller")]
     [SerializeField] private bool applyUserOffsetOnSetup = true;
     [Tooltip("Save user offset to PlayerPrefs for persistence")]
