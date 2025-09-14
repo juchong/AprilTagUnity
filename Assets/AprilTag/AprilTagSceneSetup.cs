@@ -62,6 +62,16 @@ public class AprilTagSceneSetup : MonoBehaviour
     [SerializeField] private bool enableDistanceScaling = true;
     [SerializeField] private bool enableQuestDebugging = true;
 
+    [Header("User Runtime Offset Configuration")]
+    [Tooltip("Enable user-specified runtime offset (overrides default cornerPositionOffset)")]
+    [SerializeField] private bool useUserRuntimeOffset = false;
+    [Tooltip("User-measured runtime offset values (X, Y, Z in meters)")]
+    [SerializeField] private Vector3 userRuntimeOffset = new Vector3(0.030f, 0.010f, 0.000f);
+    [Tooltip("Apply user offset immediately when setting up the controller")]
+    [SerializeField] private bool applyUserOffsetOnSetup = true;
+    [Tooltip("Save user offset to PlayerPrefs for persistence")]
+    [SerializeField] private bool saveUserOffsetToPersistence = true;
+
     [Header("WebCam Manager Settings")]
     [SerializeField] private PassthroughCameraSamples.PassthroughCameraEye cameraEye = PassthroughCameraSamples.PassthroughCameraEye.Left;
     [SerializeField] private Vector2Int requestedResolution = new Vector2Int(0, 0); // 0,0 = highest resolution
@@ -74,6 +84,12 @@ public class AprilTagSceneSetup : MonoBehaviour
 
     void Awake()
     {
+        // Load user offset from PlayerPrefs if enabled
+        if (useUserRuntimeOffset && saveUserOffsetToPersistence)
+        {
+            LoadUserOffsetFromPlayerPrefs();
+        }
+        
         if (setupOnAwake)
         {
             SetupCompleteAprilTagSystem();
@@ -224,9 +240,16 @@ public class AprilTagSceneSetup : MonoBehaviour
             enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
             
             // Set tuned configuration values
-            cornerPositionOffsetField?.SetValue(controller, cornerPositionOffset);
+            Vector3 finalCornerOffset = useUserRuntimeOffset ? userRuntimeOffset : cornerPositionOffset;
+            cornerPositionOffsetField?.SetValue(controller, finalCornerOffset);
             enableConfigurationToolField?.SetValue(controller, enableConfigurationTool);
             enableAllDebugLoggingField?.SetValue(controller, enableAllDebugLogging);
+            
+            // Apply user runtime offset if enabled
+            if (useUserRuntimeOffset && applyUserOffsetOnSetup)
+            {
+                ApplyUserRuntimeOffset(controller);
+            }
 
             // Set up tag visualization prefab
             GameObject vizPrefab = tagVizPrefab;
@@ -644,7 +667,193 @@ public class AprilTagSceneSetup : MonoBehaviour
         SetupEnvironmentRaycastManager();
     }
 
+    // User Runtime Offset Management Methods
+    private void ApplyUserRuntimeOffset(AprilTagController controller)
+    {
+        if (controller == null) return;
+        
+        // Use reflection to set the cornerPositionOffset field directly
+        var controllerType = typeof(AprilTagController);
+        var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        
+        cornerPositionOffsetField?.SetValue(controller, userRuntimeOffset);
+        
+        // Save to PlayerPrefs if enabled
+        if (saveUserOffsetToPersistence)
+        {
+            SaveUserOffsetToPlayerPrefs();
+        }
+        
+        Debug.Log($"[AprilTagSceneSetup] Applied user runtime offset: {userRuntimeOffset}");
+    }
+    
+    private void SaveUserOffsetToPlayerPrefs()
+    {
+        PlayerPrefs.SetFloat("AprilTag_CornerOffset_X", userRuntimeOffset.x);
+        PlayerPrefs.SetFloat("AprilTag_CornerOffset_Y", userRuntimeOffset.y);
+        PlayerPrefs.SetFloat("AprilTag_CornerOffset_Z", userRuntimeOffset.z);
+        PlayerPrefs.Save();
+        Debug.Log($"[AprilTagSceneSetup] Saved user runtime offset to PlayerPrefs: {userRuntimeOffset}");
+    }
+    
+    private void LoadUserOffsetFromPlayerPrefs()
+    {
+        if (PlayerPrefs.HasKey("AprilTag_CornerOffset_X"))
+        {
+            userRuntimeOffset = new Vector3(
+                PlayerPrefs.GetFloat("AprilTag_CornerOffset_X", 0f),
+                PlayerPrefs.GetFloat("AprilTag_CornerOffset_Y", 0f),
+                PlayerPrefs.GetFloat("AprilTag_CornerOffset_Z", 0f)
+            );
+            Debug.Log($"[AprilTagSceneSetup] Loaded user runtime offset from PlayerPrefs: {userRuntimeOffset}");
+        }
+    }
+    
+    /// <summary>
+    /// Set the user runtime offset values (X, Y, Z in meters)
+    /// </summary>
+    /// <param name="offset">The offset values to apply</param>
+    public void SetUserRuntimeOffset(Vector3 offset)
+    {
+        userRuntimeOffset = offset;
+        useUserRuntimeOffset = true;
+        
+        // Apply to existing controller if available
+        var controller = FindFirstObjectByType<AprilTagController>();
+        if (controller != null)
+        {
+            ApplyUserRuntimeOffset(controller);
+        }
+        
+        Debug.Log($"[AprilTagSceneSetup] Set user runtime offset: {userRuntimeOffset}");
+    }
+    
+    /// <summary>
+    /// Set individual user runtime offset components
+    /// </summary>
+    /// <param name="x">X offset in meters</param>
+    /// <param name="y">Y offset in meters</param>
+    /// <param name="z">Z offset in meters</param>
+    public void SetUserRuntimeOffset(float x, float y, float z)
+    {
+        SetUserRuntimeOffset(new Vector3(x, y, z));
+    }
+    
+    /// <summary>
+    /// Get the current user runtime offset values
+    /// </summary>
+    /// <returns>The current user runtime offset</returns>
+    public Vector3 GetUserRuntimeOffset()
+    {
+        return userRuntimeOffset;
+    }
+    
+    /// <summary>
+    /// Enable or disable user runtime offset
+    /// </summary>
+    /// <param name="enabled">Whether to use user runtime offset</param>
+    public void SetUserRuntimeOffsetEnabled(bool enabled)
+    {
+        useUserRuntimeOffset = enabled;
+        
+        // Apply changes to existing controller if available
+        var controller = FindFirstObjectByType<AprilTagController>();
+        if (controller != null)
+        {
+            Vector3 finalOffset = useUserRuntimeOffset ? userRuntimeOffset : cornerPositionOffset;
+            ApplyUserRuntimeOffset(controller);
+        }
+        
+        Debug.Log($"[AprilTagSceneSetup] User runtime offset {(enabled ? "enabled" : "disabled")}");
+    }
 
-
+    // Context Menu Methods for Easy Configuration
+    [ContextMenu("Load User Offset from PlayerPrefs")]
+    public void LoadUserOffsetFromPlayerPrefsMenu()
+    {
+        LoadUserOffsetFromPlayerPrefs();
+    }
+    
+    [ContextMenu("Save User Offset to PlayerPrefs")]
+    public void SaveUserOffsetToPlayerPrefsMenu()
+    {
+        SaveUserOffsetToPlayerPrefs();
+    }
+    
+    [ContextMenu("Apply User Runtime Offset")]
+    public void ApplyUserRuntimeOffsetMenu()
+    {
+        var controller = FindFirstObjectByType<AprilTagController>();
+        if (controller != null)
+        {
+            ApplyUserRuntimeOffset(controller);
+        }
+        else
+        {
+            Debug.LogWarning("[AprilTagSceneSetup] No AprilTagController found to apply offset to");
+        }
+    }
+    
+    [ContextMenu("Reset User Runtime Offset")]
+    public void ResetUserRuntimeOffset()
+    {
+        userRuntimeOffset = Vector3.zero;
+        useUserRuntimeOffset = false;
+        
+        var controller = FindFirstObjectByType<AprilTagController>();
+        if (controller != null)
+        {
+            // Reset to default corner offset
+            var controllerType = typeof(AprilTagController);
+            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            cornerPositionOffsetField?.SetValue(controller, cornerPositionOffset);
+        }
+        
+        Debug.Log("[AprilTagSceneSetup] Reset user runtime offset to zero and disabled user offset");
+    }
+    
+    [ContextMenu("Log Current Offset Settings")]
+    public void LogCurrentOffsetSettings()
+    {
+        Debug.Log($"[AprilTagSceneSetup] Current Offset Settings:");
+        Debug.Log($"  - Use User Runtime Offset: {useUserRuntimeOffset}");
+        Debug.Log($"  - User Runtime Offset: {userRuntimeOffset}");
+        Debug.Log($"  - Default Corner Offset: {cornerPositionOffset}");
+        Debug.Log($"  - Apply On Setup: {applyUserOffsetOnSetup}");
+        Debug.Log($"  - Save To Persistence: {saveUserOffsetToPersistence}");
+        
+        var controller = FindFirstObjectByType<AprilTagController>();
+        if (controller != null)
+        {
+            var controllerType = typeof(AprilTagController);
+            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var currentOffset = cornerPositionOffsetField?.GetValue(controller);
+            Debug.Log($"  - Current Controller Offset: {currentOffset}");
+        }
+    }
+    
+    [ContextMenu("Set Common Experimental Offsets/Small Forward Adjustment")]
+    public void SetSmallForwardAdjustment()
+    {
+        SetUserRuntimeOffset(0.01f, 0f, 0.02f); // Small forward and right adjustment
+        Debug.Log("[AprilTagSceneSetup] Applied small forward adjustment offset");
+    }
+    
+    [ContextMenu("Set Common Experimental Offsets/Medium Calibration")]
+    public void SetMediumCalibration()
+    {
+        SetUserRuntimeOffset(0.03f, 0.01f, 0.05f); // Medium calibration
+        Debug.Log("[AprilTagSceneSetup] Applied medium calibration offset");
+    }
+    
+    [ContextMenu("Set Common Experimental Offsets/Large Calibration")]
+    public void SetLargeCalibration()
+    {
+        SetUserRuntimeOffset(0.05f, 0.02f, 0.08f); // Large calibration
+        Debug.Log("[AprilTagSceneSetup] Applied large calibration offset");
+    }
 
 }
