@@ -1,0 +1,118 @@
+---
+globs: Assets/AprilTag/*.cs,Assets/AprilTag/Library/**/*.cs
+description: AprilTag detection implementation patterns and best practices
+---
+
+# AprilTag Detection Patterns
+
+This rule applies to all AprilTag-related C# files and provides guidance for implementing detection systems.
+
+## Core Detection Workflow
+
+### 1. Detector Setup
+```csharp
+// Use Tag36h11 for ArUcO compatibility (recommended)
+var detector = new TagDetector(imageWidth, imageHeight, TagFamily.Tag36h11, decimation);
+
+// Or use default constructor (Tag36h11)
+var detector = new TagDetector(imageWidth, imageHeight, decimation);
+```
+
+### 2. Image Processing
+```csharp
+// Process image with proper parameters
+detector.ProcessImage(imageBuffer, horizontalFovDeg, tagSizeMeters);
+
+// Access detected tags
+foreach (var tag in detector.DetectedTags)
+{
+    // Tag.ID, Tag.Position, Tag.Rotation available
+}
+```
+
+### 3. Proper Cleanup
+```csharp
+void OnDestroy()
+{
+    detector?.Dispose();
+}
+```
+
+## Key Configuration Parameters
+
+- **Tag Family**: Use `TagFamily.Tag36h11` (default) for best compatibility
+- **Decimation**: Values 2-8 for performance tuning (higher = faster, less accurate)
+- **Tag Size**: Must match physical tag size in meters for accurate pose estimation
+- **FOV**: Set to camera's horizontal field of view in degrees (typically 78° for Quest)
+
+## Performance Optimization
+
+### Detection Frequency Control
+```csharp
+[SerializeField] private float maxDetectionsPerSecond = 15f;
+private float lastDetectionTime;
+
+void Update()
+{
+    if (Time.time - lastDetectionTime < 1f / maxDetectionsPerSecond)
+        return;
+    
+    // Process detection
+    lastDetectionTime = Time.time;
+}
+```
+
+### Decimation Strategy
+- Start with decimation = 2 for accuracy
+- Increase to 4-8 for better performance
+- Monitor detection quality vs. performance trade-offs
+
+## Coordinate System Handling
+
+### Camera-to-World Transformation
+```csharp
+// Use proper camera reference for coordinate transformation
+var worldPosition = referenceCamera.ScreenToWorldPoint(screenPosition);
+```
+
+### Quest-Specific Positioning
+- Enable `useCenterEyeTransform` for better VR positioning
+- Use `usePassthroughRaycasting` for accurate 3D positioning
+- Apply position and rotation offsets for calibration
+
+## Error Handling
+
+### WebCamTexture Validation
+```csharp
+if (webCamTexture == null || !webCamTexture.isPlaying)
+{
+    // Wait for camera initialization
+    return;
+}
+```
+
+### Detection Result Validation
+```csharp
+if (detector.DetectedTags == null || detector.DetectedTags.Count == 0)
+{
+    // No tags detected this frame
+    return;
+}
+```
+
+## Debug and Logging
+
+- Enable minimal debug output per user preference [[memory:8818636]]
+- Only log tag detection results for fast-moving debug info
+- Use conditional compilation for debug code:
+```csharp
+#if UNITY_EDITOR || DEBUG
+    Debug.Log($"Detected tag {tag.ID}");
+#endif
+```
+
+## Integration with Meta Passthrough
+
+- Use reflection to access WebCamTextureManager to avoid compile dependencies
+- Handle WebCamTexture GPU initialization delays
+- Implement proper camera feed validation before processing

@@ -1,0 +1,191 @@
+---
+globs: Assets/PassthroughCameraApiSamples/**/*.cs,Assets/MetaXR/**/*.cs,Assets/Oculus/**/*.cs,Assets/XR/**/*.cs
+description: Meta Quest VR development patterns and Passthrough Camera API usage
+---
+
+# Meta Quest VR Development Guidelines
+
+This rule applies to Meta Quest VR development, Passthrough Camera API integration, and XR-specific code.
+
+## Meta Quest Hardware Support
+
+### Supported Devices
+- Meta Quest 2
+- Meta Quest Pro  
+- Meta Quest 3
+- Future Quest devices (when available)
+
+### Platform Requirements
+- Android SDK API level 32+
+- Meta XR SDK v78.0.0 or later
+- Unity XR Plugin Management
+- OpenXR support enabled
+
+## Passthrough Camera API Integration
+
+### WebCamTextureManager Usage
+```csharp
+// Use reflection to avoid compile-time dependencies
+private UnityEngine.Object webCamManager;
+private WebCamTexture webCamTexture;
+
+void Start()
+{
+    // Get WebCamTexture via reflection
+    var managerType = webCamManager.GetType();
+    var textureProperty = managerType.GetProperty("WebCamTexture");
+    webCamTexture = textureProperty?.GetValue(webCamManager) as WebCamTexture;
+}
+```
+
+### Camera Feed Validation
+```csharp
+bool IsCameraFeedReady()
+{
+    return webCamTexture != null && 
+           webCamTexture.isPlaying && 
+           webCamTexture.width > 0 && 
+           webCamTexture.height > 0;
+}
+```
+
+### GPU Initialization Handling
+```csharp
+void WaitForGPUTexture()
+{
+    if (webCamTexture != null && webCamTexture.width == 0)
+    {
+        // Wait for GPU texture initialization
+        StartCoroutine(WaitForTextureInitialization());
+    }
+}
+
+IEnumerator WaitForTextureInitialization()
+{
+    while (webCamTexture.width == 0)
+    {
+        yield return new WaitForSeconds(0.1f);
+    }
+}
+```
+
+## XR-Specific Positioning
+
+### Center Eye Transform Usage
+```csharp
+[SerializeField] private bool useCenterEyeTransform = true;
+
+Transform GetReferenceTransform()
+{
+    if (useCenterEyeTransform)
+    {
+        var xrOrigin = FindObjectOfType<XROrigin>();
+        return xrOrigin?.Camera?.transform;
+    }
+    return Camera.main.transform;
+}
+```
+
+### Passthrough Raycasting
+```csharp
+[SerializeField] private bool usePassthroughRaycasting = true;
+[SerializeField] private EnvironmentRaycastManager environmentRaycastManager;
+
+Vector3 GetWorldPositionFromScreen(Vector2 screenPosition)
+{
+    if (usePassthroughRaycasting && environmentRaycastManager != null)
+    {
+        // Use environment raycasting for accurate 3D positioning
+        var ray = referenceCamera.ScreenPointToRay(screenPosition);
+        if (Physics.Raycast(ray, out var hit))
+        {
+            return hit.point;
+        }
+    }
+    
+    // Fallback to standard screen-to-world conversion
+    return referenceCamera.ScreenToWorldPoint(screenPosition);
+}
+```
+
+## Quest-Specific Configuration
+
+### Build Settings
+- Target Android platform
+- Enable ARM64 architecture
+- Set minimum API level to 32
+- Enable Meta Quest support in XR settings
+
+### Project Settings
+```csharp
+// Required XR settings
+PlayerSettings.SetScriptingDefineSymbolsForGroup(BuildTargetGroup.Android, "OCULUS_QUEST");
+PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel32;
+```
+
+### Manifest Permissions
+The following permissions are automatically added by Meta's samples:
+```xml
+<uses-permission android:name="android.permission.CAMERA" />
+<uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
+<uses-permission android:name="com.oculus.permission.USE_SCENE" />
+<uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="true" />
+```
+
+## Performance Considerations
+
+### VR Performance Targets
+- Maintain 72 FPS for Quest 2
+- Maintain 90 FPS for Quest Pro/3
+- Keep CPU usage below 50% per core
+- Monitor memory usage (Quest has limited RAM)
+
+### Passthrough Camera Optimization
+```csharp
+[SerializeField] private int targetFPS = 15; // Lower for better performance
+[SerializeField] private Vector2Int resolutionScale = new Vector2Int(1, 1);
+
+void ConfigureCameraPerformance()
+{
+    // Reduce resolution for better performance
+    webCamTexture.requestedWidth = Screen.width / resolutionScale.x;
+    webCamTexture.requestedHeight = Screen.height / resolutionScale.y;
+    webCamTexture.requestedFPS = targetFPS;
+}
+```
+
+## Development and Testing
+
+### Editor vs. Device Testing
+- Editor mode: Permissions are automatically granted
+- Device testing: Requires actual permission flow
+- Always test on physical Quest hardware for accurate behavior
+
+### Debug Information
+```csharp
+#if UNITY_EDITOR
+    // Editor-specific debug code
+    Debug.Log("Editor mode - permissions simulated");
+#else
+    // Device-specific code
+    Debug.Log($"Quest device: {SystemInfo.deviceModel}");
+#endif
+```
+
+## Common Quest-Specific Issues
+
+### Camera Initialization
+- WebCamTexture may take 2-3 seconds to initialize on Quest
+- Implement proper waiting mechanisms
+- Handle initialization failures gracefully
+
+### Permission Handling
+- Quest requires explicit permission requests
+- Users may deny permissions - handle gracefully
+- Provide clear explanations for permission needs
+
+### Performance Optimization
+- Use object pooling for frequent allocations
+- Implement frame rate limiting for detection
+- Monitor thermal throttling on Quest devices

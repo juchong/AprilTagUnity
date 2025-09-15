@@ -1,0 +1,349 @@
+---
+globs: Assets/AprilTag/**/*.cs,Assets/PassthroughCameraApiSamples/**/*.cs
+description: Performance optimization patterns for VR applications and AprilTag detection
+---
+
+# Performance Optimization Guidelines
+
+This rule covers performance optimization patterns for VR applications, AprilTag detection, and Meta Quest development.
+
+## VR Performance Targets
+
+### Frame Rate Requirements
+- **Quest 2**: Maintain 72 FPS minimum
+- **Quest Pro/3**: Maintain 90 FPS minimum
+- **Target**: Keep CPU usage below 50% per core
+- **Memory**: Monitor Quest's limited RAM (6GB Quest 2, 12GB Quest Pro/3)
+
+### Performance Monitoring
+```csharp
+[Header("Performance Monitoring")]
+[SerializeField] private bool enablePerformanceMonitoring = true;
+[SerializeField] private float performanceCheckInterval = 1f;
+
+void Update()
+{
+    if (enablePerformanceMonitoring && Time.time % performanceCheckInterval < Time.deltaTime)
+    {
+        LogPerformanceMetrics();
+    }
+}
+
+void LogPerformanceMetrics()
+{
+    float fps = 1f / Time.deltaTime;
+    float memory = System.GC.GetTotalMemory(false) / 1024f / 1024f; // MB
+    
+    if (fps < 60f) // Warning threshold
+    {
+        Debug.LogWarning($"Low FPS: {fps:F1} | Memory: {memory:F1}MB");
+    }
+}
+```
+
+## AprilTag Detection Optimization
+
+### Detection Frequency Control
+```csharp
+[Header("Detection Performance")]
+[SerializeField] private float maxDetectionsPerSecond = 15f;
+[SerializeField] private float detectionTimeBudgetMs = 16f; // Max time per frame
+
+private float lastDetectionTime;
+private float detectionStartTime;
+
+void Update()
+{
+    // Limit detection frequency
+    if (Time.time - lastDetectionTime < 1f / maxDetectionsPerSecond)
+        return;
+    
+    // Budget detection time per frame
+    detectionStartTime = Time.realtimeSinceStartup;
+    ProcessDetection();
+    
+    // Check if we exceeded time budget
+    float detectionTime = (Time.realtimeSinceStartup - detectionStartTime) * 1000f;
+    if (detectionTime > detectionTimeBudgetMs)
+    {
+        Debug.LogWarning($"Detection took {detectionTime:F1}ms, budget was {detectionTimeBudgetMs}ms");
+    }
+}
+```
+
+### Decimation Strategy
+```csharp
+[Header("Image Processing")]
+[SerializeField] private int decimation = 2; // Start with 2, increase for performance
+[SerializeField] private bool adaptiveDecimation = true;
+[SerializeField] private int performanceDecimation = 4; // Higher decimation for low performance
+
+int GetCurrentDecimation()
+{
+    if (!adaptiveDecimation) return decimation;
+    
+    float fps = 1f / Time.deltaTime;
+    if (fps < 60f) // Low performance
+    {
+        return performanceDecimation;
+    }
+    else if (fps < 72f) // Quest 2 threshold
+    {
+        return Mathf.Max(decimation, 3);
+    }
+    
+    return decimation;
+}
+```
+
+### Image Resolution Scaling
+```csharp
+[Header("Resolution Scaling")]
+[SerializeField] private Vector2Int resolutionScale = new Vector2Int(1, 1);
+[SerializeField] private bool dynamicResolutionScaling = true;
+[SerializeField] private float lowPerformanceScale = 0.5f;
+
+Vector2Int GetTargetResolution()
+{
+    if (!dynamicResolutionScaling) 
+        return new Vector2Int(Screen.width / resolutionScale.x, Screen.height / resolutionScale.y);
+    
+    float fps = 1f / Time.deltaTime;
+    if (fps < 60f)
+    {
+        return new Vector2Int(
+            (int)(Screen.width * lowPerformanceScale), 
+            (int)(Screen.height * lowPerformanceScale)
+        );
+    }
+    
+    return new Vector2Int(Screen.width / resolutionScale.x, Screen.height / resolutionScale.y);
+}
+```
+
+## Memory Management
+
+### Object Pooling for Frequent Allocations
+```csharp
+public class TagVisualizationPool : MonoBehaviour
+{
+    [SerializeField] private GameObject tagVizPrefab;
+    [SerializeField] private int poolSize = 20;
+    
+    private Queue<GameObject> availableObjects = new Queue<GameObject>();
+    private List<GameObject> allObjects = new List<GameObject>();
+    
+    void Start()
+    {
+        // Pre-allocate pool objects
+        for (int i = 0; i < poolSize; i++)
+        {
+            var obj = Instantiate(tagVizPrefab);
+            obj.SetActive(false);
+            availableObjects.Enqueue(obj);
+            allObjects.Add(obj);
+        }
+    }
+    
+    public GameObject GetVisualization()
+    {
+        if (availableObjects.Count > 0)
+        {
+            var obj = availableObjects.Dequeue();
+            obj.SetActive(true);
+            return obj;
+        }
+        
+        // Pool exhausted - create new object
+        var newObj = Instantiate(tagVizPrefab);
+        allObjects.Add(newObj);
+        return newObj;
+    }
+    
+    public void ReturnVisualization(GameObject obj)
+    {
+        obj.SetActive(false);
+        availableObjects.Enqueue(obj);
+    }
+}
+```
+
+### Proper Resource Disposal
+```csharp
+void OnDestroy()
+{
+    // Dispose AprilTag detectors
+    detector?.Dispose();
+    
+    // Unsubscribe from events
+    AprilTagPermissionsManager.OnAllPermissionsGranted -= OnPermissionsReady;
+    AprilTagPermissionsManager.OnPermissionsDenied -= OnPermissionsDenied;
+    
+    // Stop coroutines
+    StopAllCoroutines();
+    
+    // Clear collections to help GC
+    detectedTags.Clear();
+    tagVisualizations.Clear();
+}
+```
+
+### Texture Memory Management
+```csharp
+void ManageTextureMemory()
+{
+    // Release unused textures
+    if (webCamTexture != null && !webCamTexture.isPlaying)
+    {
+        webCamTexture.Stop();
+        DestroyImmediate(webCamTexture);
+        webCamTexture = null;
+    }
+    
+    // Force garbage collection periodically
+    if (Time.frameCount % 300 == 0) // Every 5 seconds at 60fps
+    {
+        System.GC.Collect();
+    }
+}
+```
+
+## Camera Feed Optimization
+
+### Efficient Image Processing
+```csharp
+void ProcessCameraFeed()
+{
+    if (webCamTexture == null || !webCamTexture.isPlaying)
+        return;
+    
+    // Use direct pixel access instead of Graphics.CopyTexture for better performance
+    var pixels = webCamTexture.GetPixels32();
+    
+    // Process only every Nth pixel for performance
+    int step = GetCurrentDecimation();
+    for (int y = 0; y < webCamTexture.height; y += step)
+    {
+        for (int x = 0; x < webCamTexture.width; x += step)
+        {
+            // Process pixel at (x, y)
+            ProcessPixel(pixels[y * webCamTexture.width + x], x, y);
+        }
+    }
+}
+```
+
+### Camera Configuration for Performance
+```csharp
+void ConfigureCameraForPerformance()
+{
+    if (webCamTexture == null) return;
+    
+    // Set optimal resolution for performance
+    var targetRes = GetTargetResolution();
+    webCamTexture.requestedWidth = targetRes.x;
+    webCamTexture.requestedHeight = targetRes.y;
+    
+    // Limit frame rate
+    webCamTexture.requestedFPS = Mathf.Min(30, maxDetectionsPerSecond);
+    
+    // Use lower quality if needed
+    webCamTexture.requestedMipmapLevel = 1;
+}
+```
+
+## Debug Output Optimization
+
+### Conditional Debug Logging
+```csharp
+[Header("Debug Settings")]
+[SerializeField] private bool enableDebugLogs = false;
+[SerializeField] private bool logOnlyDetections = true; // User preference for minimal output
+
+void LogDebug(string message, bool isDetectionLog = false)
+{
+    // Follow user preference for minimal debug output
+    if (logOnlyDetections && !isDetectionLog) return;
+    if (!enableDebugLogs) return;
+    
+    Debug.Log($"[AprilTag] {message}");
+}
+
+void LogDetection(int tagId, Vector3 position)
+{
+    // Fast-moving debug logs for tag detection (user preference)
+    LogDebug($"Detected tag {tagId} at {position}", true);
+}
+```
+
+### Performance-Aware Logging
+```csharp
+void LogPerformanceAware(string message)
+{
+    // Only log in editor or when performance is good
+    #if UNITY_EDITOR
+        Debug.Log(message);
+    #else
+        if (1f / Time.deltaTime > 60f) // Only if FPS is good
+        {
+            Debug.Log(message);
+        }
+    #endif
+}
+```
+
+## Quest-Specific Optimizations
+
+### Thermal Management
+```csharp
+[Header("Thermal Management")]
+[SerializeField] private bool enableThermalThrottling = true;
+[SerializeField] private float thermalThrottleThreshold = 0.8f;
+
+void Update()
+{
+    if (enableThermalThrottling)
+    {
+        CheckThermalState();
+    }
+}
+
+void CheckThermalState()
+{
+    // Reduce performance when device gets hot
+    float cpuUsage = SystemInfo.processorFrequency / 100f; // Simplified metric
+    
+    if (cpuUsage > thermalThrottleThreshold)
+    {
+        // Reduce detection frequency and quality
+        maxDetectionsPerSecond = Mathf.Max(5f, maxDetectionsPerSecond * 0.5f);
+        decimation = Mathf.Min(8, decimation + 1);
+        
+        Debug.LogWarning("Thermal throttling active - reducing performance");
+    }
+}
+```
+
+### Battery Optimization
+```csharp
+void OptimizeForBattery()
+{
+    // Reduce detection frequency on battery
+    if (SystemInfo.batteryLevel < 0.2f) // Less than 20% battery
+    {
+        maxDetectionsPerSecond = Mathf.Max(5f, maxDetectionsPerSecond * 0.7f);
+        decimation = Mathf.Min(6, decimation + 1);
+    }
+}
+```
+
+## Best Practices Summary
+
+1. **Monitor frame rate continuously** - Maintain VR performance targets
+2. **Use object pooling** - Avoid frequent allocations in Update()
+3. **Implement adaptive quality** - Reduce quality when performance drops
+4. **Proper resource disposal** - Always clean up in OnDestroy()
+5. **Conditional debug logging** - Follow user preference for minimal output
+6. **Camera feed optimization** - Use efficient pixel access methods
+7. **Thermal management** - Handle Quest device thermal throttling
+8. **Memory monitoring** - Keep track of memory usage on limited Quest RAM

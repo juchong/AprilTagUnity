@@ -1,0 +1,267 @@
+---
+globs: Assets/AprilTag/*Permissions*.cs,Assets/Plugins/Android/**/*.xml
+description: Android permissions system and Meta Quest permission handling
+---
+
+# Android Permissions System
+
+This rule covers the permission system implementation for Meta Quest devices and Android platform requirements.
+
+## Required Permissions
+
+### Core Permissions
+```xml
+<!-- Camera access for WebCamTexture -->
+<uses-permission android:name="android.permission.CAMERA" />
+
+<!-- Horizon OS passthrough camera access (v74+) -->
+<uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
+
+<!-- Spatial data access for AR features -->
+<uses-permission android:name="com.oculus.permission.USE_SCENE" />
+```
+
+### Feature Declarations
+```xml
+<!-- Passthrough camera feature requirement -->
+<uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="true" />
+```
+
+## Permission Management Components
+
+### AprilTagPermissionsManager
+The core permission management system that handles:
+- Permission status checking
+- Automatic permission requests
+- Event-driven permission state changes
+- Retry mechanisms for denied permissions
+
+```csharp
+public class AprilTagPermissionsManager : MonoBehaviour
+{
+    [Header("Permission Settings")]
+    [SerializeField] private bool requestPermissionsOnStart = true;
+    [SerializeField] private bool retryOnDenial = true;
+    [SerializeField] private float retryDelaySeconds = 2f;
+    [SerializeField] private bool enableDebugLogs = false;
+    
+    // Static events for system-wide permission status
+    public static event Action OnAllPermissionsGranted;
+    public static event Action OnPermissionsDenied;
+    
+    // Static properties for easy access
+    public static bool HasAllPermissions { get; private set; }
+    public static bool HasCameraPermissions { get; private set; }
+    public static bool HasSpatialPermissions { get; private set; }
+}
+```
+
+### AprilTagPermissionUI
+User interface component for permission management:
+```csharp
+public class AprilTagPermissionUI : MonoBehaviour
+{
+    [Header("UI Settings")]
+    [SerializeField] private bool showPanelOnStart = true;
+    [SerializeField] private bool autoHideOnGranted = true;
+    [SerializeField] private float autoHideDelay = 2f;
+    
+    [Header("UI References")]
+    [SerializeField] private GameObject permissionPanel;
+    [SerializeField] private Text statusText;
+    [SerializeField] private Button requestButton;
+}
+```
+
+## Permission Checking Patterns
+
+### Runtime Permission Validation
+```csharp
+bool CheckAndroidPermissions()
+{
+    #if UNITY_ANDROID && !UNITY_EDITOR
+        // Check camera permission
+        bool hasCamera = Permission.HasUserAuthorizedPermission(Permission.Camera);
+        
+        // Check spatial permission (Quest-specific)
+        bool hasSpatial = CheckSpatialPermission();
+        
+        return hasCamera && hasSpatial;
+    #else
+        // Editor or non-Android platforms
+        return true;
+    #endif
+}
+```
+
+### Quest-Specific Spatial Permission
+```csharp
+bool CheckSpatialPermission()
+{
+    #if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            // Use reflection to check Oculus-specific permissions
+            var permissionClass = System.Type.GetType("UnityEngine.Android.Permission");
+            var hasPermissionMethod = permissionClass?.GetMethod("HasUserAuthorizedPermission", 
+                new[] { typeof(string) });
+            
+            return (bool)hasPermissionMethod?.Invoke(null, new object[] { "com.oculus.permission.USE_SCENE" });
+        }
+        catch
+        {
+            return false;
+        }
+    #else
+        return true;
+    #endif
+}
+```
+
+## Permission Request Flow
+
+### Automatic Request Pattern
+```csharp
+void Start()
+{
+    if (requestPermissionsOnStart)
+    {
+        CheckAndRequestPermissions();
+    }
+}
+
+void CheckAndRequestPermissions()
+{
+    if (!HasAllPermissions)
+    {
+        RequestPermissions();
+    }
+    else
+    {
+        OnAllPermissionsGranted?.Invoke();
+    }
+}
+```
+
+### Manual Request with Retry
+```csharp
+public void RequestPermissions()
+{
+    #if UNITY_ANDROID && !UNITY_EDITOR
+        // Request camera permission
+        Permission.RequestUserPermission(Permission.Camera);
+        
+        // Request spatial permission
+        RequestSpatialPermission();
+        
+        // Schedule retry check
+        Invoke(nameof(CheckPermissionStatus), 1f);
+    #else
+        // Simulate permission grant in editor
+        OnAllPermissionsGranted?.Invoke();
+    #endif
+}
+```
+
+## Integration with AprilTag Controller
+
+### Permission-Gated Detection
+```csharp
+void Update()
+{
+    // Only run detection if permissions are granted
+    if (!AprilTagPermissionsManager.HasAllPermissions)
+    {
+        return;
+    }
+    
+    // Proceed with AprilTag detection
+    ProcessDetection();
+}
+```
+
+### Event-Driven Integration
+```csharp
+void Awake()
+{
+    // Subscribe to permission events
+    AprilTagPermissionsManager.OnAllPermissionsGranted += OnPermissionsReady;
+    AprilTagPermissionsManager.OnPermissionsDenied += OnPermissionsDenied;
+}
+
+void OnPermissionsReady()
+{
+    Debug.Log("Permissions granted - starting AprilTag detection");
+    StartDetection();
+}
+
+void OnPermissionsDenied()
+{
+    Debug.Log("Permissions denied - showing user message");
+    ShowPermissionDeniedUI();
+}
+```
+
+## Error Handling and Fallbacks
+
+### Graceful Permission Denial
+```csharp
+void OnPermissionsDenied()
+{
+    if (retryOnDenial)
+    {
+        // Show user message and retry
+        ShowRetryMessage();
+        Invoke(nameof(RequestPermissions), retryDelaySeconds);
+    }
+    else
+    {
+        // Show permanent denial message
+        ShowPermissionDeniedPermanently();
+    }
+}
+```
+
+### Fallback Functionality
+```csharp
+void OnPermissionsDenied()
+{
+    // Provide fallback functionality when permissions are denied
+    Debug.Log("Camera permissions denied - using mock data for testing");
+    EnableMockMode();
+}
+```
+
+## Platform-Specific Handling
+
+### Editor vs. Device Behavior
+```csharp
+void CheckPermissions()
+{
+    #if UNITY_EDITOR
+        // Automatically grant permissions in editor
+        OnAllPermissionsGranted?.Invoke();
+    #elif UNITY_ANDROID
+        // Check actual Android permissions
+        CheckAndroidPermissions();
+    #else
+        // Other platforms - assume permissions granted
+        OnAllPermissionsGranted?.Invoke();
+    #endif
+}
+```
+
+### Quest-Specific Considerations
+- Horizon OS v74+ requires `horizonos.permission.HEADSET_CAMERA`
+- Spatial permissions are required for environment understanding
+- Permission requests may be denied multiple times - implement retry logic
+- Provide clear explanations to users about why permissions are needed
+
+## Best Practices
+
+1. **Always check permissions before accessing camera or spatial data**
+2. **Provide clear user explanations for permission requirements**
+3. **Implement graceful fallbacks for permission denials**
+4. **Use the UI component to provide visual feedback**
+5. **Test permission flows on actual Quest devices**
+6. **Handle permission state changes reactively with events**

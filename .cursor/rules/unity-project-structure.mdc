@@ -1,0 +1,55 @@
+---
+alwaysApply: true
+description: Unity project structure and development guidelines for AprilTagUnity
+---
+
+# Unity Project Structure Guidelines
+
+This project is a Unity VR application designed specifically for Meta Quest headsets to detect AprilTag markers using the Passthrough Camera API. The primary focus is on runtime functionality that works on Quest devices, not editor-based debugging tools.
+
+## Core Architecture
+
+- **Main Entry Point**: [AprilTagController.cs](mdc:Assets/AprilTag/AprilTagController.cs) - The primary component for AprilTag detection
+- **Setup Helper**: [AprilTagSetupHelper.cs](mdc:Assets/AprilTag/AprilTagSetupHelper.cs) - Automated configuration
+- **Scene Setup**: [AprilTagSceneSetup.cs](mdc:Assets/AprilTag/AprilTagSceneSetup.cs) - **PRIMARY FOCUS** - Complete system setup and runtime configuration (context menus are not useful on Quest)
+- **Permission System**: [AprilTagPermissionsManager.cs](mdc:Assets/AprilTag/AprilTagPermissionsManager.cs) - Handles camera and spatial permissions
+
+## Key Directories
+
+- `Assets/AprilTag/` - Core AprilTag implementation and controllers
+- `Assets/AprilTag/Library/` - Locally integrated AprilTag library (originally from Keijiro Takahashi)
+- `Assets/PassthroughCameraApiSamples/` - Meta's official Passthrough Camera API samples
+- `Assets/Resources/` - Project settings and configuration assets
+
+## Development Patterns
+
+### Component Structure
+- Use `[SerializeField]` for inspector-exposed fields
+- Implement proper `Awake()`, `Start()`, `Update()`, and `OnDestroy()` lifecycle methods
+- Use reflection for optional dependencies (WebCamTextureManager) to avoid compile-time requirements
+- Follow Unity's naming conventions for public fields (PascalCase)
+
+### Memory Management
+- Always dispose AprilTag detectors properly in `OnDestroy()`
+- Use `using` statements for disposable objects
+- Avoid creating objects in Update() - use object pooling for frequent allocations
+- Follow user preference for minimal debug output [[memory:8818636]]
+
+### File Management
+- **NEVER create .meta files** when working on this project [[memory:8818643]]
+- **NEVER create or modify .unity files** - focus on code changes only
+- Use relative paths when referencing assets
+- Keep the locally integrated AprilTag library unchanged unless absolutely necessary
+
+### Quest-Specific Development Focus
+- **Primary development target**: [AprilTagSceneSetup.cs](mdc:Assets/AprilTag/AprilTagSceneSetup.cs) for runtime configuration
+- **Avoid editor-only features**: Context menus and Unity debugging tools don't work on Quest headsets
+- **Focus on runtime functionality**: All changes should work when deployed to Quest device
+- **Test on actual Quest hardware**: Editor testing is insufficient for VR applications
+
+## Integration Points
+
+- **Meta Passthrough Camera API**: Uses reflection to access WebCamTextureManager
+- **Unity XR**: Integrates with XR Core Utils for VR positioning
+- **AprilTag Library**: Locally integrated, no external package dependencies
+- **Android Permissions**: Handles camera and spatial permissions automatically
