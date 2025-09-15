@@ -1,884 +1,290 @@
-// Assets/AprilTag/AprilTagSceneSetup.cs
-// Complete setup script for AprilTag permission system and detection functionality
+// Assets/AprilTag/AprilTagSceneSetupSimplified.cs
+// Simplified setup script for AprilTag detection system on Quest
+// Automatically creates all necessary components with sensible defaults
 
 using UnityEngine;
 using UnityEngine.UI;
-using AprilTag; // For tag family enum
+using AprilTag;
 using PassthroughCameraSamples;
 using Meta.XR.Samples;
 using Meta.XR;
 
-[System.Serializable]
 public class AprilTagSceneSetup : MonoBehaviour
 {
-    [Header("Auto Setup")]
+    [Header("Essential Settings")]
+    [Tooltip("Automatically set up the complete system when the scene starts")]
     [SerializeField] private bool setupOnAwake = true;
-    [SerializeField] private bool createPermissionsManager = true;
-    [SerializeField] private bool createPermissionUI = true;
-    [SerializeField] private bool createAprilTagController = true;
-    [SerializeField] private bool createWebCamManager = true;
-    [SerializeField] private bool connectToWebCamManager = true;
-    [SerializeField] private bool createEnvironmentRaycastManager = true;
-    [SerializeField] private bool setupQuestSpecificFeatures = true;
-
-    [Header("Permission Manager Settings")]
-    [SerializeField] private bool requestPermissionsOnStart = true;
-    [SerializeField] private bool retryOnDenial = true;
-    [SerializeField] private float retryDelaySeconds = 2f;
-
-    [Header("Permission UI Settings")]
-    [SerializeField] private bool showPanelOnStart = true;
-    [SerializeField] private bool autoHideOnGranted = true;
-    [SerializeField] private float autoHideDelay = 3f;
-
-    [Header("AprilTag Detection Settings")]
-    [SerializeField] private AprilTag.Interop.TagFamily tagFamily = AprilTag.Interop.TagFamily.Tag36h11;
-    [SerializeField] private float tagSizeMeters = 0.165f;
-    [Range(1, 8)][SerializeField] private int decimate = 2;
-    [SerializeField] private float maxDetectionsPerSecond = 72f;
-    [SerializeField] private float horizontalFovDeg = 78f;
-    [SerializeField] private bool scaleVizToTagSize = true;
-
-    [Header("Tag Visualization")]
-    [SerializeField] private GameObject tagVizPrefab;
-    [SerializeField] private bool createSimpleTagViz = true;
-    [SerializeField] private Camera referenceCamera;
-    [SerializeField] private Vector3 positionOffset = Vector3.zero;
-    [SerializeField] private Vector3 rotationOffset = Vector3.zero;
-    [SerializeField] private bool useCenterEyeTransform = true;
-    [SerializeField] private float cameraHeightOffset = 0.0f;
-    [SerializeField] private bool enableIPDCompensation = true;
     
-    [Header("Tuned Configuration (Default Values)")]
-    [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.000f, 0.000f, 0.000f);
-    [SerializeField] private bool enableConfigurationTool = true;
-    [SerializeField] private bool enableAllDebugLogging = false;
-    [SerializeField] private bool usePassthroughRaycasting = true;
-    [SerializeField] private bool ignoreOcclusion = true;
-    [SerializeField] private float positionScaleFactor = 1.0f;
-    [SerializeField] private float minDetectionDistance = 0.3f;
-    [SerializeField] private float maxDetectionDistance = 20.0f;
-    [SerializeField] private bool enableDistanceScaling = true;
-    [SerializeField] private bool enableQuestDebugging = true;
+    [Header("AprilTag Detection")]
+    [Tooltip("Physical size of your AprilTag markers in meters")]
+    [SerializeField] private float tagSizeMeters = 0.165f;
+    [Tooltip("Tag visualization prefab (optional - will create default if not set)")]
+    [SerializeField] private GameObject tagVizPrefab;
+    
+    [Header("Advanced Settings")]
+    [Tooltip("Detection performance vs accuracy (1=highest quality, 8=fastest)")]
+    [Range(1, 8)][SerializeField] private int decimation = 2;
+    [Tooltip("Maximum detections per second")]
+    [SerializeField] private float maxDetectionsPerSecond = 30f;
+    [Tooltip("Position offset for calibration")]
+    [SerializeField] private Vector3 positionOffset = Vector3.zero;
+    [Tooltip("Rotation offset for calibration")]
+    [SerializeField] private Vector3 rotationOffset = Vector3.zero;
 
-    [Header("User Runtime Offset Configuration")]
-    [Tooltip("Enable user-specified runtime offset (overrides default cornerPositionOffset)")]
-    [SerializeField] private bool useUserRuntimeOffset = false;
-    [Tooltip("User-measured runtime offset values (X, Y, Z in meters)")]
-    [SerializeField] private Vector3 userRuntimeOffset = new Vector3(0.000f, 0.000f, 0.000f);
-    [Tooltip("Apply user offset immediately when setting up the controller")]
-    [SerializeField] private bool applyUserOffsetOnSetup = true;
-    [Tooltip("Save user offset to PlayerPrefs for persistence")]
-    [SerializeField] private bool saveUserOffsetToPersistence = true;
-
-
-    [Header("WebCam Manager Settings")]
-    [SerializeField] private PassthroughCameraSamples.PassthroughCameraEye cameraEye = PassthroughCameraSamples.PassthroughCameraEye.Left;
-    [SerializeField] private Vector2Int requestedResolution = new Vector2Int(0, 0); // 0,0 = highest resolution
-
-    [Header("Quest-Specific Settings")]
-    [SerializeField] private bool enablePassthroughRaycasting = true;
-    [SerializeField] private bool autoFindEnvironmentRaycastManager = true;
-    [SerializeField] private EnvironmentRaycastManager environmentRaycastManager;
-    [SerializeField] private bool createSimpleEnvironmentRaycastManager = true;
-
+    // Fixed settings that work well for Quest
+    private const AprilTag.Interop.TagFamily tagFamily = AprilTag.Interop.TagFamily.Tag36h11;
+    private const float horizontalFovDeg = 78f;
+    private const PassthroughCameraSamples.PassthroughCameraEye cameraEye = PassthroughCameraSamples.PassthroughCameraEye.Left;
+    
     void Awake()
     {
-        // Load user offset from PlayerPrefs if enabled
-        if (useUserRuntimeOffset && saveUserOffsetToPersistence)
-        {
-            LoadUserOffsetFromPlayerPrefs();
-        }
-        
         if (setupOnAwake)
         {
-            SetupCompleteAprilTagSystem();
+            SetupCompleteSystem();
         }
     }
 
     [ContextMenu("Setup Complete AprilTag System")]
-    public void SetupCompleteAprilTagSystem()
+    public void SetupCompleteSystem()
     {
-
-        // Create or configure permissions manager
-        if (createPermissionsManager)
-        {
-            SetupPermissionsManager();
-        }
-
-        // Create or configure permission UI
-        if (createPermissionUI)
-        {
-            SetupPermissionUI();
-        }
-
-        // Create or configure WebCam Manager
-        if (createWebCamManager)
-        {
-            SetupWebCamManager();
-        }
-
-        // Create or configure AprilTag controller
-        if (createAprilTagController)
-        {
-            SetupAprilTagController();
-        }
-
-        // Connect to WebCam Manager if available
-        if (connectToWebCamManager)
-        {
-            ConnectToWebCamManager();
-        }
-
-        // Setup Quest-specific features
-        if (setupQuestSpecificFeatures)
-        {
-            SetupQuestSpecificFeatures();
-        }
-
-    }
-
-    [ContextMenu("Setup AprilTag Permissions Only")]
-    public void SetupAprilTagPermissions()
-    {
-
-        // Create or configure permissions manager
-        if (createPermissionsManager)
-        {
-            SetupPermissionsManager();
-        }
-
-        // Create or configure permission UI
-        if (createPermissionUI)
-        {
-            SetupPermissionUI();
-        }
-
-    }
-
-    private void SetupAprilTagController()
-    {
-        var existingController = FindFirstObjectByType<AprilTagController>();
-        if (existingController == null)
-        {
-            // Create new AprilTag controller
-            var controllerGO = new GameObject("AprilTagController");
-            var controller = controllerGO.AddComponent<AprilTagController>();
-
-            // Configure settings via reflection
-            var controllerType = typeof(AprilTagController);
-            
-            // Set detection settings
-            var tagFamilyField = controllerType.GetField("tagFamily", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var tagSizeField = controllerType.GetField("tagSizeMeters", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var decimateField = controllerType.GetField("decimate", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var maxDetectionsField = controllerType.GetField("maxDetectionsPerSecond", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var fovField = controllerType.GetField("horizontalFovDeg", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var scaleVizField = controllerType.GetField("scaleVizToTagSize", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var vizPrefabField = controllerType.GetField("tagVizPrefab", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var referenceCameraField = controllerType.GetField("referenceCamera", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var positionOffsetField = controllerType.GetField("positionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var rotationOffsetField = controllerType.GetField("rotationOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var useCenterEyeTransformField = controllerType.GetField("useCenterEyeTransform", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var cameraHeightOffsetField = controllerType.GetField("cameraHeightOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableIPDCompensationField = controllerType.GetField("enableIPDCompensation", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var usePassthroughRaycastingField = controllerType.GetField("usePassthroughRaycasting", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var environmentRaycastManagerField = controllerType.GetField("environmentRaycastManager", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var ignoreOcclusionField = controllerType.GetField("ignoreOcclusion", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var positionScaleFactorField = controllerType.GetField("positionScaleFactor", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var minDetectionDistanceField = controllerType.GetField("minDetectionDistance", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var maxDetectionDistanceField = controllerType.GetField("maxDetectionDistance", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableConfigurationToolField = controllerType.GetField("enableConfigurationTool", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableAllDebugLoggingField = controllerType.GetField("enableAllDebugLogging", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableDistanceScalingField = controllerType.GetField("enableDistanceScaling", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableQuestDebuggingField = controllerType.GetField("enableQuestDebugging", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // PhotonVision-inspired filtering fields
-            var enablePoseSmoothingField = controllerType.GetField("enablePoseSmoothing", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableMultiFrameValidationField = controllerType.GetField("enableMultiFrameValidation", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableCornerQualityAssessmentField = controllerType.GetField("enableCornerQualityAssessment", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // Quest perspective correction fields
-            var useImprovedIntrinsicsField = controllerType.GetField("useImprovedIntrinsics", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            tagFamilyField?.SetValue(controller, tagFamily);
-            tagSizeField?.SetValue(controller, tagSizeMeters);
-            decimateField?.SetValue(controller, decimate);
-            maxDetectionsField?.SetValue(controller, maxDetectionsPerSecond);
-            fovField?.SetValue(controller, horizontalFovDeg);
-            scaleVizField?.SetValue(controller, scaleVizToTagSize);
-            referenceCameraField?.SetValue(controller, referenceCamera);
-            positionOffsetField?.SetValue(controller, positionOffset);
-            rotationOffsetField?.SetValue(controller, rotationOffset);
-            useCenterEyeTransformField?.SetValue(controller, useCenterEyeTransform);
-            cameraHeightOffsetField?.SetValue(controller, cameraHeightOffset);
-            enableIPDCompensationField?.SetValue(controller, enableIPDCompensation);
-            usePassthroughRaycastingField?.SetValue(controller, usePassthroughRaycasting);
-            environmentRaycastManagerField?.SetValue(controller, environmentRaycastManager);
-            ignoreOcclusionField?.SetValue(controller, ignoreOcclusion);
-            positionScaleFactorField?.SetValue(controller, positionScaleFactor);
-            minDetectionDistanceField?.SetValue(controller, minDetectionDistance);
-            maxDetectionDistanceField?.SetValue(controller, maxDetectionDistance);
-            enableDistanceScalingField?.SetValue(controller, enableDistanceScaling);
-            enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
-            
-            // Apply PhotonVision-inspired filtering settings (enabled by default for better accuracy)
-            enablePoseSmoothingField?.SetValue(controller, true);
-            enableMultiFrameValidationField?.SetValue(controller, true);
-            enableCornerQualityAssessmentField?.SetValue(controller, true);
-            
-            // Apply Quest-specific fixes for wall-mounted tag parallax
-            usePassthroughRaycastingField?.SetValue(controller, true);
-            useImprovedIntrinsicsField?.SetValue(controller, true);
-            
-            // Use center eye transform for better head angle compensation
-            useCenterEyeTransformField?.SetValue(controller, true);
-            
-            // Set tuned configuration values
-            Vector3 finalCornerOffset = useUserRuntimeOffset ? userRuntimeOffset : cornerPositionOffset;
-            cornerPositionOffsetField?.SetValue(controller, finalCornerOffset);
-            enableConfigurationToolField?.SetValue(controller, enableConfigurationTool);
-            enableAllDebugLoggingField?.SetValue(controller, enableAllDebugLogging);
-            
-            // Apply user runtime offset if enabled
-            if (useUserRuntimeOffset && applyUserOffsetOnSetup)
-            {
-                ApplyUserRuntimeOffset(controller);
-            }
-
-            // Set up tag visualization prefab
-            GameObject vizPrefab = tagVizPrefab;
-            if (vizPrefab == null && createSimpleTagViz)
-            {
-                vizPrefab = CreateSimpleTagVisualizationPrefab();
-            }
-            vizPrefabField?.SetValue(controller, vizPrefab);
-
-            // Position the controller appropriately
-            controllerGO.transform.position = Vector3.zero;
-
-        }
-        else
-        {
-        }
-    }
-
-    private GameObject CreateSimpleTagVisualizationPrefab()
-    {
-        // Create a wireframe cube prefab for tag visualization
-        var prefab = new GameObject("SimpleTagVizPrefab");
+        Debug.Log("[AprilTagSetup] Starting complete system setup...");
         
+        // 1. Create Permissions Manager (always needed)
+        SetupPermissionsManager();
         
-        // Start with unit scale - will be scaled by tagSizeMeters in positioning logic
-        prefab.transform.localScale = Vector3.one;
+        // 2. Create Permission UI (always needed)
+        SetupPermissionUI();
         
-        // Create the wireframe cube using LineRenderer
-        var wireframe = CreateWireframeCube(prefab.transform);
+        // 3. Create WebCam Manager (always needed)
+        SetupWebCamManager();
         
-        // Remove any colliders (not needed for visualization)
-        var colliders = prefab.GetComponentsInChildren<Collider>();
-        foreach (var col in colliders)
-        {
-            if (col != null) DestroyImmediate(col);
-        }
-
-        return prefab;
-    }
-    
-    private GameObject CreateWireframeCube(Transform parent)
-    {
-        // Create the main wireframe cube
-        var wireframeGO = new GameObject("WireframeCube");
-        wireframeGO.transform.SetParent(parent);
-        wireframeGO.transform.localPosition = Vector3.zero;
-        wireframeGO.transform.localScale = Vector3.one;
-        wireframeGO.transform.localRotation = Quaternion.Euler(0f, 0f, 0f); // Rotated 90 degrees around X axis
+        // 4. Create AprilTag Controller (always needed)
+        SetupAprilTagController();
         
-        // Define cube vertices (8 corners) - positions after -90 degree X rotation
-        // After rotating -90 degrees around X: Y becomes Z, Z becomes -Y
-        var vertices = new Vector3[]
-        {
-            // Bottom face (red - touching the tag) - now at Z = -0.5
-            new Vector3(-0.5f, -0.5f, -0.5f), // 0
-            new Vector3(0.5f, -0.5f, -0.5f),  // 1
-            new Vector3(0.5f, 0.5f, -0.5f),   // 2
-            new Vector3(-0.5f, 0.5f, -0.5f),  // 3
-            
-            // Top face (green - above the tag) - now at Z = 0.5
-            new Vector3(-0.5f, -0.5f, 0.5f),  // 4
-            new Vector3(0.5f, -0.5f, 0.5f),   // 5
-            new Vector3(0.5f, 0.5f, 0.5f),    // 6
-            new Vector3(-0.5f, 0.5f, 0.5f)    // 7
-        };
+        // 5. Setup Quest-specific features
+        SetupQuestFeatures();
         
-        // Create LineRenderer for green wireframe (top face and vertical edges)
-        var greenLineRenderer = wireframeGO.AddComponent<LineRenderer>();
-        greenLineRenderer.material = CreateWireframeMaterial(Color.green);
-        greenLineRenderer.startWidth = 0.002f;
-        greenLineRenderer.endWidth = 0.002f;
-        greenLineRenderer.useWorldSpace = false;
-        greenLineRenderer.loop = false;
-        
-        // Green lines: front face + vertical edges
-        var greenLineIndices = new int[]
-        {
-            // Front face (green) - 4 lines  
-            0, 1, 1, 2, 2, 3, 3, 0,
-            // Vertical edges (green) - 4 lines
-            0, 4, 1, 5, 2, 6, 3, 7
-        };
-        
-        // Create green line positions array
-        var greenLinePositions = new Vector3[greenLineIndices.Length];
-        for (int i = 0; i < greenLineIndices.Length; i++)
-        {
-            greenLinePositions[i] = vertices[greenLineIndices[i]];
-        }
-        
-        greenLineRenderer.positionCount = greenLinePositions.Length;
-        greenLineRenderer.SetPositions(greenLinePositions);
-        
-        // Create separate GameObject for red bottom face
-        var bottomGO = new GameObject("BottomFace");
-        bottomGO.transform.SetParent(wireframeGO.transform);
-        bottomGO.transform.localPosition = Vector3.zero;
-        bottomGO.transform.localScale = Vector3.one;
-        
-        var bottomLineRenderer = bottomGO.AddComponent<LineRenderer>();
-        bottomLineRenderer.material = CreateWireframeMaterial(Color.red);
-        bottomLineRenderer.startWidth = 0.003f; // Slightly thicker for bottom
-        bottomLineRenderer.endWidth = 0.003f;
-        bottomLineRenderer.useWorldSpace = false;
-        bottomLineRenderer.loop = false;
-        
-        // Back face only (red) - now the face at Z = 0.5
-        var bottomLineIndices = new int[] { 4, 5, 5, 6, 6, 7, 7, 4 };
-        var bottomLinePositions = new Vector3[bottomLineIndices.Length];
-        for (int i = 0; i < bottomLineIndices.Length; i++)
-        {
-            bottomLinePositions[i] = vertices[bottomLineIndices[i]];
-        }
-        
-        bottomLineRenderer.positionCount = bottomLinePositions.Length;
-        bottomLineRenderer.SetPositions(bottomLinePositions);
-        
-        // Create a red dot to mark one of the corners of the AprilTag
-        var dotGO = new GameObject("CornerDot");
-        dotGO.transform.SetParent(wireframeGO.transform);
-        dotGO.transform.localPosition = new Vector3(-0.5f, -0.5f, 0.5f); // Back face corner
-        dotGO.transform.localScale = Vector3.one * 0.1f; // Double size for better visibility
-        
-        // Create a sphere for the dot
-        var dotMesh = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        dotMesh.transform.SetParent(dotGO.transform);
-        dotMesh.transform.localPosition = Vector3.zero;
-        dotMesh.transform.localScale = Vector3.one;
-        
-        // Make it red and configure for no occlusion
-        var dotRenderer = dotMesh.GetComponent<Renderer>();
-        if (dotRenderer != null)
-        {
-            var dotMaterial = CreateWireframeMaterial(Color.red);
-            dotRenderer.material = dotMaterial;
-        }
-        
-        // Remove the collider
-        var dotCollider = dotMesh.GetComponent<Collider>();
-        if (dotCollider != null)
-        {
-            DestroyImmediate(dotCollider);
-        }
-        
-        return wireframeGO;
-    }
-    
-    private Material CreateWireframeMaterial(Color color)
-    {
-        // Create a simple unlit material for wireframe
-        var shader = Shader.Find("Unlit/Color");
-        if (shader == null)
-        {
-            // Fallback to default shader if Unlit/Color is not found
-            shader = Shader.Find("Legacy Shaders/Diffuse");
-        }
-        
-        if (shader == null)
-        {
-            // Final fallback to default material
-            var material = new Material(Shader.Find("Standard"));
-            material.color = color;
-            material.SetFloat("_Metallic", 0f);
-            material.SetFloat("_Smoothness", 0f);
-            return material;
-        }
-        
-        var wireframeMaterial = new Material(shader);
-        wireframeMaterial.color = color;
-        
-        // Configure to ignore occlusion
-        wireframeMaterial.renderQueue = 2000; // High but valid render queue
-        wireframeMaterial.SetInt("_ZWrite", 0); // Don't write to depth buffer
-        wireframeMaterial.SetInt("_ZTest", 0); // Always pass depth test
-        
-        return wireframeMaterial;
-    }
-
-    private void SetupWebCamManager()
-    {
-        var existingWebCamManager = FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
-        if (existingWebCamManager == null)
-        {
-            // Create new WebCam Manager
-            var webCamManagerGO = new GameObject("WebCamTextureManager");
-            var webCamManager = webCamManagerGO.AddComponent<PassthroughCameraSamples.WebCamTextureManager>();
-
-            // Configure settings via reflection
-            var managerType = typeof(PassthroughCameraSamples.WebCamTextureManager);
-            
-            // Set camera eye
-            var eyeField = managerType.GetField("Eye", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            eyeField?.SetValue(webCamManager, cameraEye);
-
-            // Set requested resolution
-            var resolutionField = managerType.GetField("RequestedResolution", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            resolutionField?.SetValue(webCamManager, requestedResolution);
-
-            // Set up camera permissions reference
-            var permissionsField = managerType.GetField("CameraPermissions", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // Try to find existing permissions manager or create a reference
-            var permissionsManager = FindFirstObjectByType<AprilTagPermissionsManager>();
-            if (permissionsManager != null)
-            {
-                // Create a simple permissions component for the WebCam Manager
-                var simplePermissions = webCamManagerGO.AddComponent<PassthroughCameraSamples.PassthroughCameraPermissions>();
-                permissionsField?.SetValue(webCamManager, simplePermissions);
-            }
-
-            // Position the manager appropriately
-            webCamManagerGO.transform.position = Vector3.zero;
-
-        }
-        else
-        {
-        }
-    }
-
-    private void ConnectToWebCamManager()
-    {
-        // Find WebCamTextureManager in the scene
-        var webCamTextureManager = FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
-        if (webCamTextureManager == null)
-        {
-            Debug.LogWarning("[AprilTagSceneSetup] No WebCamTextureManager found in scene. AprilTag detection may not work without passthrough camera feed.");
-            return;
-        }
-
-        // Find AprilTagController in the scene
-        var aprilTagController = FindFirstObjectByType<AprilTagController>();
-        if (aprilTagController == null)
-        {
-            Debug.LogWarning("[AprilTagSceneSetup] No AprilTagController found in scene. Cannot connect to WebCamTextureManager.");
-            return;
-        }
-
-        // Connect the AprilTagController to the WebCamTextureManager
-        var controllerType = typeof(AprilTagController);
-        var webCamManagerField = controllerType.GetField("webCamManager", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
-        if (webCamManagerField != null)
-        {
-            webCamManagerField.SetValue(aprilTagController, webCamTextureManager);
-        }
-        else
-        {
-            Debug.LogError("[AprilTagSceneSetup] Could not access webCamManager field in AprilTagController");
-        }
+        Debug.Log("[AprilTagSetup] Complete system setup finished!");
     }
 
     private void SetupPermissionsManager()
     {
-        var existingManager = FindFirstObjectByType<AprilTagPermissionsManager>();
-        if (existingManager == null)
+        var existing = FindFirstObjectByType<AprilTagPermissionsManager>();
+        if (existing == null)
         {
-            // Create new permissions manager
-            var managerGO = new GameObject("AprilTagPermissionsManager");
-            var manager = managerGO.AddComponent<AprilTagPermissionsManager>();
+            var go = new GameObject("AprilTagPermissionsManager");
+            var manager = go.AddComponent<AprilTagPermissionsManager>();
             
-            // Configure settings via reflection (since fields are private)
-            var managerType = typeof(AprilTagPermissionsManager);
-            var requestOnStartField = managerType.GetField("requestPermissionsOnStart", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var retryOnDenialField = managerType.GetField("retryOnDenial", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var retryDelayField = managerType.GetField("retryDelaySeconds", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            requestOnStartField?.SetValue(manager, requestPermissionsOnStart);
-            retryOnDenialField?.SetValue(manager, retryOnDenial);
-            retryDelayField?.SetValue(manager, retryDelaySeconds);
-
-        }
-        else
-        {
+            // Configure with sensible defaults via reflection
+            var type = typeof(AprilTagPermissionsManager);
+            SetPrivateField(manager, type, "requestPermissionsOnStart", true);
+            SetPrivateField(manager, type, "retryOnDenial", true);
+            SetPrivateField(manager, type, "retryDelaySeconds", 2f);
+            
+            Debug.Log("[AprilTagSetup] Created AprilTagPermissionsManager");
         }
     }
 
     private void SetupPermissionUI()
     {
-        var existingUI = FindFirstObjectByType<AprilTagPermissionUI>();
-        if (existingUI == null)
+        var existing = FindFirstObjectByType<AprilTagPermissionUI>();
+        if (existing == null)
         {
-            // Create a simple UI canvas if none exists
+            // Ensure we have a canvas
             var canvas = FindFirstObjectByType<Canvas>();
             if (canvas == null)
             {
                 var canvasGO = new GameObject("Canvas");
                 canvas = canvasGO.AddComponent<Canvas>();
-                canvas.renderMode = RenderMode.WorldSpace;
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
                 canvasGO.AddComponent<CanvasScaler>();
                 canvasGO.AddComponent<GraphicRaycaster>();
-                
             }
 
-            // Create permission UI panel
-            var panelGO = new GameObject("AprilTagPermissionPanel");
-            panelGO.transform.SetParent(canvas.transform, false);
+            // Create permission UI
+            var go = new GameObject("AprilTagPermissionUI");
+            go.transform.SetParent(canvas.transform, false);
+            var ui = go.AddComponent<AprilTagPermissionUI>();
             
-            // Add UI components
-            var image = panelGO.AddComponent<UnityEngine.UI.Image>();
-            image.color = new Color(0, 0, 0, 0.8f);
+            // Configure with sensible defaults
+            var type = typeof(AprilTagPermissionUI);
+            SetPrivateField(ui, type, "showPanelOnStart", true);
+            SetPrivateField(ui, type, "autoHideOnGranted", true);
+            SetPrivateField(ui, type, "autoHideDelay", 3f);
             
-            var rectTransform = panelGO.GetComponent<RectTransform>();
-            rectTransform.sizeDelta = new Vector2(400, 300);
-            rectTransform.anchoredPosition = Vector2.zero;
-
-            // Add permission UI component
-            var permissionUI = panelGO.AddComponent<AprilTagPermissionUI>();
-            
-            // Configure settings via reflection
-            var uiType = typeof(AprilTagPermissionUI);
-            var showPanelField = uiType.GetField("showPanelOnStart", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var autoHideField = uiType.GetField("autoHideOnGranted", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var hideDelayField = uiType.GetField("autoHideDelay", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            showPanelField?.SetValue(permissionUI, showPanelOnStart);
-            autoHideField?.SetValue(permissionUI, autoHideOnGranted);
-            hideDelayField?.SetValue(permissionUI, autoHideDelay);
-
-            // Initially hide the panel (it will show automatically if permissions are needed)
-            panelGO.SetActive(false);
-
-        }
-        else
-        {
+            Debug.Log("[AprilTagSetup] Created AprilTagPermissionUI");
         }
     }
 
-
-
-
-
-
-
-    [ContextMenu("Setup Quest-Specific Features")]
-    public void SetupQuestSpecificFeatures()
+    private void SetupWebCamManager()
     {
-
-        // Setup Environment Raycast Manager
-        if (createEnvironmentRaycastManager)
+        var existing = FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
+        if (existing == null)
         {
-            SetupEnvironmentRaycastManager();
+            var go = new GameObject("WebCamTextureManager");
+            var manager = go.AddComponent<PassthroughCameraSamples.WebCamTextureManager>();
+            
+            // Configure for Quest passthrough
+            manager.Eye = cameraEye;
+            manager.RequestedResolution = new Vector2Int(0, 0); // Highest resolution
+            
+            // Create and assign PassthroughCameraPermissions component
+            var permissions = go.AddComponent<PassthroughCameraSamples.PassthroughCameraPermissions>();
+            manager.CameraPermissions = permissions;
+            
+            Debug.Log("[AprilTagSetup] Created WebCamTextureManager");
         }
-
-        // Auto-find Environment Raycast Manager if needed
-        if (autoFindEnvironmentRaycastManager && environmentRaycastManager == null)
-        {
-            environmentRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
-            if (environmentRaycastManager != null)
-            {
-            }
-        }
-
-        // Update AprilTag Controller with Quest settings
-        UpdateAprilTagControllerWithQuestSettings();
-
     }
 
-    private void SetupEnvironmentRaycastManager()
+    private void SetupAprilTagController()
     {
-        var existingManager = FindFirstObjectByType<EnvironmentRaycastManager>();
-        if (existingManager == null)
+        var existing = FindFirstObjectByType<AprilTagController>();
+        if (existing == null)
         {
-            if (createSimpleEnvironmentRaycastManager)
+            var go = new GameObject("AprilTagController");
+            var controller = go.AddComponent<AprilTagController>();
+            
+            // Configure via reflection
+            var type = typeof(AprilTagController);
+            
+            // Set detection parameters
+            SetPrivateField(controller, type, "tagFamily", tagFamily);
+            SetPrivateField(controller, type, "tagSizeMeters", tagSizeMeters);
+            SetPrivateField(controller, type, "decimate", decimation);
+            SetPrivateField(controller, type, "maxDetectionsPerSecond", maxDetectionsPerSecond);
+            SetPrivateField(controller, type, "horizontalFovDeg", horizontalFovDeg);
+            
+            // Set visualization
+            GameObject vizPrefab = tagVizPrefab ?? CreateDefaultVisualizationPrefab();
+            SetPrivateField(controller, type, "tagVizPrefab", vizPrefab);
+            SetPrivateField(controller, type, "scaleVizToTagSize", true);
+            
+            // Set offsets
+            SetPrivateField(controller, type, "positionOffset", positionOffset);
+            SetPrivateField(controller, type, "rotationOffset", rotationOffset);
+            
+            // Set Quest-optimized settings
+            SetPrivateField(controller, type, "useCenterEyeTransform", true);
+            SetPrivateField(controller, type, "usePassthroughRaycasting", true);
+            SetPrivateField(controller, type, "ignoreOcclusion", true);
+            SetPrivateField(controller, type, "enableQuestDebugging", false);
+            SetPrivateField(controller, type, "enableAllDebugLogging", false);
+            
+            // Connect to WebCamManager
+            var webCamManager = FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
+            if (webCamManager != null)
             {
-                // Create a simple Environment Raycast Manager
-                var managerGO = new GameObject("EnvironmentRaycastManager");
-                environmentRaycastManager = managerGO.AddComponent<EnvironmentRaycastManager>();
-                
+                SetPrivateField(controller, type, "webCamManager", webCamManager);
+            }
+            
+            Debug.Log("[AprilTagSetup] Created and configured AprilTagController");
+        }
+    }
+
+    private void SetupQuestFeatures()
+    {
+        // Create Environment Raycast Manager if needed
+        var raycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
+        if (raycastManager == null)
+        {
+            var go = new GameObject("EnvironmentRaycastManager");
+            raycastManager = go.AddComponent<EnvironmentRaycastManager>();
+            Debug.Log("[AprilTagSetup] Created EnvironmentRaycastManager");
+        }
+        
+        // Update AprilTag controller with raycast manager
+        var controller = FindFirstObjectByType<AprilTagController>();
+        if (controller != null && raycastManager != null)
+        {
+            var type = typeof(AprilTagController);
+            SetPrivateField(controller, type, "environmentRaycastManager", raycastManager);
+        }
+    }
+
+    private GameObject CreateDefaultVisualizationPrefab()
+    {
+        var prefab = new GameObject("AprilTagVisualizationPrefab");
+        
+        // Create a simple cube for visualization
+        var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cube.name = "TagVisualizer";
+        cube.transform.SetParent(prefab.transform);
+        cube.transform.localPosition = Vector3.zero;
+        cube.transform.localScale = new Vector3(1f, 1f, 0.02f); // Thin cube
+        
+        // Apply red translucent material
+        var renderer = cube.GetComponent<MeshRenderer>();
+        if (renderer != null)
+        {
+            var material = CreateRedMaterial(0.4f); // 40% opacity red
+            if (material != null)
+            {
+                renderer.material = material;
+            }
+        }
+        
+        // Remove collider (handle both edit and play mode)
+        var collider = cube.GetComponent<Collider>();
+        if (collider != null)
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(collider);
             }
             else
             {
-                Debug.LogWarning("[AprilTagSceneSetup] No EnvironmentRaycastManager found and createSimpleEnvironmentRaycastManager is disabled. Please add one manually or enable createSimpleEnvironmentRaycastManager.");
+                DestroyImmediate(collider);
             }
         }
-        else
+        
+        // Make the prefab inactive so it doesn't render in the scene
+        prefab.SetActive(false);
+        
+        Debug.Log("[AprilTagSetup] Created default visualization prefab");
+        return prefab;
+    }
+    
+    private Material CreateRedMaterial(float opacity)
+    {
+        // Try to find a suitable shader with fallbacks
+        var shader = Shader.Find("Unlit/Color");
+        if (shader == null)
         {
-            environmentRaycastManager = existingManager;
+            shader = Shader.Find("Legacy Shaders/Diffuse");
         }
+        if (shader == null)
+        {
+            shader = Shader.Find("Standard");
+        }
+        
+        if (shader != null)
+        {
+            var material = new Material(shader);
+            material.color = new Color(1f, 0f, 0f, opacity);
+            material.renderQueue = 3000; // Render on top
+            
+            // Enable transparency if using Standard shader and not fully opaque
+            if (shader.name == "Standard" && opacity < 1f)
+            {
+                material.SetFloat("_Mode", 3); // Transparent mode
+                material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                material.SetInt("_ZWrite", 0);
+                material.EnableKeyword("_ALPHABLEND_ON");
+            }
+            
+            return material;
+        }
+        
+        return null;
     }
 
-    private void UpdateAprilTagControllerWithQuestSettings()
+    // Helper method to set private fields via reflection
+    private void SetPrivateField(object target, System.Type type, string fieldName, object value)
     {
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller == null)
-        {
-            Debug.LogWarning("[AprilTagSceneSetup] No AprilTagController found to update with Quest settings");
-            return;
-        }
-        
-        // Update Quest-specific settings using reflection
-        var controllerType = typeof(AprilTagController);
-        var usePassthroughRaycastingField = controllerType.GetField("usePassthroughRaycasting", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var environmentRaycastManagerField = controllerType.GetField("environmentRaycastManager", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-        usePassthroughRaycastingField?.SetValue(controller, enablePassthroughRaycasting);
-        environmentRaycastManagerField?.SetValue(controller, environmentRaycastManager);
-
+        var field = type.GetField(fieldName, 
+            System.Reflection.BindingFlags.NonPublic | 
+            System.Reflection.BindingFlags.Instance);
+        field?.SetValue(target, value);
     }
-
-    [ContextMenu("Setup Environment Raycast Manager Only")]
-    public void SetupEnvironmentRaycastManagerOnly()
-    {
-        SetupEnvironmentRaycastManager();
-    }
-
-    // User Runtime Offset Management Methods
-    private void ApplyUserRuntimeOffset(AprilTagController controller)
-    {
-        if (controller == null) return;
-        
-        // Use reflection to set the cornerPositionOffset field directly
-        var controllerType = typeof(AprilTagController);
-        var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
-        cornerPositionOffsetField?.SetValue(controller, userRuntimeOffset);
-        
-        // Save to PlayerPrefs if enabled
-        if (saveUserOffsetToPersistence)
-        {
-            SaveUserOffsetToPlayerPrefs();
-        }
-        
-        Debug.Log($"[AprilTagSceneSetup] Applied user runtime offset: {userRuntimeOffset}");
-    }
-    
-    private void SaveUserOffsetToPlayerPrefs()
-    {
-        PlayerPrefs.SetFloat("AprilTag_CornerOffset_X", userRuntimeOffset.x);
-        PlayerPrefs.SetFloat("AprilTag_CornerOffset_Y", userRuntimeOffset.y);
-        PlayerPrefs.SetFloat("AprilTag_CornerOffset_Z", userRuntimeOffset.z);
-        PlayerPrefs.Save();
-        Debug.Log($"[AprilTagSceneSetup] Saved user runtime offset to PlayerPrefs: {userRuntimeOffset}");
-    }
-    
-    private void LoadUserOffsetFromPlayerPrefs()
-    {
-        if (PlayerPrefs.HasKey("AprilTag_CornerOffset_X"))
-        {
-            userRuntimeOffset = new Vector3(
-                PlayerPrefs.GetFloat("AprilTag_CornerOffset_X", 0f),
-                PlayerPrefs.GetFloat("AprilTag_CornerOffset_Y", 0f),
-                PlayerPrefs.GetFloat("AprilTag_CornerOffset_Z", 0f)
-            );
-            Debug.Log($"[AprilTagSceneSetup] Loaded user runtime offset from PlayerPrefs: {userRuntimeOffset}");
-        }
-    }
-    
-    /// <summary>
-    /// Set the user runtime offset values (X, Y, Z in meters)
-    /// </summary>
-    /// <param name="offset">The offset values to apply</param>
-    public void SetUserRuntimeOffset(Vector3 offset)
-    {
-        userRuntimeOffset = offset;
-        useUserRuntimeOffset = true;
-        
-        // Apply to existing controller if available
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
-        {
-            ApplyUserRuntimeOffset(controller);
-        }
-        
-        Debug.Log($"[AprilTagSceneSetup] Set user runtime offset: {userRuntimeOffset}");
-    }
-    
-    /// <summary>
-    /// Set individual user runtime offset components
-    /// </summary>
-    /// <param name="x">X offset in meters</param>
-    /// <param name="y">Y offset in meters</param>
-    /// <param name="z">Z offset in meters</param>
-    public void SetUserRuntimeOffset(float x, float y, float z)
-    {
-        SetUserRuntimeOffset(new Vector3(x, y, z));
-    }
-    
-    /// <summary>
-    /// Get the current user runtime offset values
-    /// </summary>
-    /// <returns>The current user runtime offset</returns>
-    public Vector3 GetUserRuntimeOffset()
-    {
-        return userRuntimeOffset;
-    }
-    
-    /// <summary>
-    /// Enable or disable user runtime offset
-    /// </summary>
-    /// <param name="enabled">Whether to use user runtime offset</param>
-    public void SetUserRuntimeOffsetEnabled(bool enabled)
-    {
-        useUserRuntimeOffset = enabled;
-        
-        // Apply changes to existing controller if available
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
-        {
-            Vector3 finalOffset = useUserRuntimeOffset ? userRuntimeOffset : cornerPositionOffset;
-            ApplyUserRuntimeOffset(controller);
-        }
-        
-        Debug.Log($"[AprilTagSceneSetup] User runtime offset {(enabled ? "enabled" : "disabled")}");
-    }
-
-    // Context Menu Methods for Easy Configuration
-    [ContextMenu("Load User Offset from PlayerPrefs")]
-    public void LoadUserOffsetFromPlayerPrefsMenu()
-    {
-        LoadUserOffsetFromPlayerPrefs();
-    }
-    
-    [ContextMenu("Save User Offset to PlayerPrefs")]
-    public void SaveUserOffsetToPlayerPrefsMenu()
-    {
-        SaveUserOffsetToPlayerPrefs();
-    }
-    
-    [ContextMenu("Apply User Runtime Offset")]
-    public void ApplyUserRuntimeOffsetMenu()
-    {
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
-        {
-            ApplyUserRuntimeOffset(controller);
-        }
-        else
-        {
-            Debug.LogWarning("[AprilTagSceneSetup] No AprilTagController found to apply offset to");
-        }
-    }
-    
-    [ContextMenu("Reset User Runtime Offset")]
-    public void ResetUserRuntimeOffset()
-    {
-        userRuntimeOffset = Vector3.zero;
-        useUserRuntimeOffset = false;
-        
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
-        {
-            // Reset to default corner offset
-            var controllerType = typeof(AprilTagController);
-            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            cornerPositionOffsetField?.SetValue(controller, cornerPositionOffset);
-        }
-        
-        Debug.Log("[AprilTagSceneSetup] Reset user runtime offset to zero and disabled user offset");
-    }
-    
-    [ContextMenu("Log Current Offset Settings")]
-    public void LogCurrentOffsetSettings()
-    {
-        Debug.Log($"[AprilTagSceneSetup] Current Offset Settings:");
-        Debug.Log($"  - Use User Runtime Offset: {useUserRuntimeOffset}");
-        Debug.Log($"  - User Runtime Offset: {userRuntimeOffset}");
-        Debug.Log($"  - Default Corner Offset: {cornerPositionOffset}");
-        Debug.Log($"  - Apply On Setup: {applyUserOffsetOnSetup}");
-        Debug.Log($"  - Save To Persistence: {saveUserOffsetToPersistence}");
-        
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
-        {
-            var controllerType = typeof(AprilTagController);
-            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var currentOffset = cornerPositionOffsetField?.GetValue(controller);
-            Debug.Log($"  - Current Controller Offset: {currentOffset}");
-        }
-    }
-    
-    [ContextMenu("Set Common Experimental Offsets/Small Forward Adjustment")]
-    public void SetSmallForwardAdjustment()
-    {
-        SetUserRuntimeOffset(0.01f, 0f, 0.02f); // Small forward and right adjustment
-        Debug.Log("[AprilTagSceneSetup] Applied small forward adjustment offset");
-    }
-    
-    [ContextMenu("Set Common Experimental Offsets/Medium Calibration")]
-    public void SetMediumCalibration()
-    {
-        SetUserRuntimeOffset(0.03f, 0.01f, 0.05f); // Medium calibration
-        Debug.Log("[AprilTagSceneSetup] Applied medium calibration offset");
-    }
-    
-    [ContextMenu("Set Common Experimental Offsets/Large Calibration")]
-    public void SetLargeCalibration()
-    {
-        SetUserRuntimeOffset(0.05f, 0.02f, 0.08f); // Large calibration
-        Debug.Log("[AprilTagSceneSetup] Applied large calibration offset");
-    }
-    
-
 }

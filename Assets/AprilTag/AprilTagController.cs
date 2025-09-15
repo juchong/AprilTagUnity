@@ -75,9 +75,9 @@ public class AprilTagController : MonoBehaviour
 
     [Header("Diagnostics")]
     [Tooltip("Enable all debug logging (can be toggled at runtime)")]
-    [SerializeField] private bool enableAllDebugLogging = true;
+    [SerializeField] private bool enableAllDebugLogging = false;
     [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
-    [SerializeField] private bool enableConfigurationTool = true;
+    [SerializeField] private bool enableConfigurationTool = false;
     
     [Header("PhotonVision-Inspired Filtering")]
     [Tooltip("Enable pose smoothing filter (reduces jitter)")]
