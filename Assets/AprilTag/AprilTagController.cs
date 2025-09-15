@@ -79,6 +79,14 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
     [SerializeField] private bool enableConfigurationTool = true;
     
+    [Header("GPU Preprocessing")]
+    [Tooltip("Enable GPU-accelerated image preprocessing for better detection quality")]
+    [SerializeField] private bool enableGPUPreprocessing = true; // Fixed and re-enabled
+    [Tooltip("GPU preprocessing settings")]
+    [SerializeField] private AprilTagGPUPreprocessor.PreprocessingSettings gpuPreprocessingSettings = new AprilTagGPUPreprocessor.PreprocessingSettings();
+    [Tooltip("Save preprocessed image for debugging (creates AprilTag_Debug.png in project root)")]
+    [SerializeField] private bool debugSavePreprocessedImage = false;
+    
     [Header("PhotonVision-Inspired Filtering")]
     [Tooltip("Enable pose smoothing filter (reduces jitter)")]
     [SerializeField] private bool enablePoseSmoothing = true;
@@ -101,6 +109,9 @@ public class AprilTagController : MonoBehaviour
 
     // CPU buffers
     private Color32[] _rgba;
+    
+    // GPU preprocessor
+    private AprilTagGPUPreprocessor _gpuPreprocessor;
     
     // Headset pose tracking for continuous adjustment
     private Quaternion _lastHeadsetRotation = Quaternion.identity;
@@ -265,27 +276,142 @@ public class AprilTagController : MonoBehaviour
             if (enableAllDebugLogging) Debug.Log($"[AprilTag] Recreating detector: {wct.width}x{wct.height}, decimate={decimate}");
             RecreateDetectorIfNeeded(wct.width, wct.height, decimate);
         }
+        
+        // Ensure GPU preprocessor matches the feed dimensions
+        if (enableGPUPreprocessing)
+        {
+            if (_gpuPreprocessor == null || _detW != wct.width || _detH != wct.height)
+            {
+                _gpuPreprocessor?.Dispose();
+                _gpuPreprocessor = new AprilTagGPUPreprocessor(wct.width, wct.height, gpuPreprocessingSettings);
+                
+                if (_gpuPreprocessor.IsInitialized)
+                {
+                    if (enableAllDebugLogging) Debug.Log($"[AprilTag] Created GPU preprocessor: {wct.width}x{wct.height}");
+                }
+                else
+                {
+                    Debug.LogError("[AprilTag] Failed to initialize GPU preprocessor - falling back to CPU processing");
+                    _gpuPreprocessor = null;
+                    enableGPUPreprocessing = false;
+                }
+            }
+        }
 
-        // Get pixels directly from WebCamTexture (avoids GPU initialization issues with Graphics.CopyTexture)
+        // Get pixels - either preprocessed or raw
         try
         {
-            _rgba = wct.GetPixels32();
+            if (enableGPUPreprocessing && _gpuPreprocessor != null && _gpuPreprocessor.IsInitialized)
+            {
+                try
+                {
+                    // Process image on GPU
+                    var processedTexture = _gpuPreprocessor.ProcessTexture(wct);
+                    if (processedTexture != null)
+                    {
+                        _rgba = _gpuPreprocessor.GetProcessedPixels();
+                        if (_rgba != null && _rgba.Length > 0)
+                        {
+                            // Validate pixel count matches expected size
+                            int expectedPixels = wct.width * wct.height;
+                            if (_rgba.Length == expectedPixels)
+                            {
+                                if (enableAllDebugLogging && Time.frameCount % 60 == 0) 
+                                {
+                                    Debug.Log($"[AprilTag] GPU preprocessing completed in {_gpuPreprocessor.LastProcessingTimeMs:F2}ms, processed {_rgba.Length} pixels");
+                                }
+                                
+                                // Debug: Save preprocessed image
+                                if (debugSavePreprocessedImage && Time.frameCount % 300 == 0) // Every 5 seconds
+                                {
+                                    SaveDebugImage(_rgba, _detW, _detH);
+                                }
+                            }
+                            else
+                            {
+                                // Pixel count mismatch - fallback to raw
+                                Debug.LogError($"[AprilTag] GPU preprocessing pixel count mismatch: expected {expectedPixels}, got {_rgba.Length}. Falling back to raw pixels.");
+                                _rgba = wct.GetPixels32();
+                            }
+                        }
+                        else
+                        {
+                            // GPU processing returned no pixels, fallback to raw
+                            _rgba = wct.GetPixels32();
+                            if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] GPU preprocessing returned no pixels, using raw pixels");
+                        }
+                    }
+                    else
+                    {
+                        // Fallback to raw pixels if GPU processing failed
+                        _rgba = wct.GetPixels32();
+                        if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] GPU preprocessing texture was null, using raw pixels");
+                    }
+                }
+                catch (Exception e)
+                {
+                    // GPU processing crashed - disable it and fallback to raw
+                    Debug.LogError($"[AprilTag] GPU preprocessing crashed: {e.Message}. Disabling GPU preprocessing and using raw pixels.");
+                    enableGPUPreprocessing = false;
+                    _gpuPreprocessor?.Dispose();
+                    _gpuPreprocessor = null;
+                    _rgba = wct.GetPixels32();
+                }
+            }
+            else
+            {
+                // Get pixels directly from WebCamTexture (original path)
+                _rgba = wct.GetPixels32();
+            }
+            
             if (_rgba == null || _rgba.Length == 0)
             {
-                if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning("[AprilTag] WebCamTexture returned no pixel data");
+                if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning("[AprilTag] No pixel data available");
                 return;
             }
         }
         catch (System.Exception ex)
         {
-            if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning($"[AprilTag] Failed to get pixels from WebCamTexture: {ex.Message}");
+            if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning($"[AprilTag] Failed to get pixels: {ex.Message}");
             return;
         }
 
-        // NOTE: Correct usage � DO NOT pass _rgba to the constructor.
+        // NOTE: Correct usage – DO NOT pass _rgba to the constructor.
         // Constructor takes (width, height, decimation).
         // Detection call takes (pixels, fovDeg, tagSizeMeters).
         _detector.ProcessImage(_rgba.AsSpan(), horizontalFovDeg, tagSizeMeters);
+
+        // Debug logging for detection count
+        if (Time.frameCount % 60 == 0) // Log every second regardless of enableAllDebugLogging
+        {
+            var tagCount = _detector.DetectedTags?.Count() ?? 0;
+            if (tagCount == 0)
+            {
+                Debug.Log($"[AprilTag] No tags detected. Detector: {_detW}x{_detH}, decimation={_detDecim}, tagSize={tagSizeMeters}m, FOV={horizontalFovDeg}°, GPU={enableGPUPreprocessing}");
+                
+                // Additional debug info
+                if (Time.frameCount % 300 == 0) // Every 5 seconds
+                {
+                    Debug.Log($"[AprilTag] Detection params: Family={tagFamily}, MaxDetections/sec={maxDetectionsPerSecond}");
+                    Debug.Log($"[AprilTag] WebCamTexture: {wct?.width}x{wct?.height}, isPlaying={wct?.isPlaying}");
+                    Debug.Log($"[AprilTag] Pixel buffer size: {_rgba?.Length ?? 0}");
+                    
+                    // Check if we have a viz prefab
+                    if (!tagVizPrefab)
+                    {
+                        Debug.LogWarning("[AprilTag] WARNING: No tag visualization prefab assigned!");
+                    }
+                }
+            }
+            else
+            {
+                Debug.Log($"[AprilTag] SUCCESS! Detected {tagCount} tags!");
+                foreach (var tag in _detector.DetectedTags.Take(5)) // Log first 5 tags
+                {
+                    Debug.Log($"[AprilTag] - Tag ID: {tag.ID}, Position: {tag.Position}, Rotation: {tag.Rotation.eulerAngles}");
+                }
+            }
+        }
 
         // Visualize detected tags using corner-based positioning
         var seen = new HashSet<int>();
@@ -341,7 +467,14 @@ public class AprilTagController : MonoBehaviour
 
             if (!_vizById.TryGetValue(t.ID, out var tr) || tr == null)
             {
-                if (!tagVizPrefab) continue;
+                if (!tagVizPrefab)
+                {
+                    if (enableAllDebugLogging && Time.frameCount % 300 == 0)
+                    {
+                        Debug.LogWarning($"[AprilTag] No tag visualization prefab assigned! Cannot create visualization for tag {t.ID}");
+                    }
+                    continue;
+                }
                 tr = Instantiate(tagVizPrefab).transform;
                 tr.name = $"AprilTag_{t.ID}";
                 
@@ -497,6 +630,50 @@ public class AprilTagController : MonoBehaviour
     {
         _detector?.Dispose();
         _detector = null;
+        
+        _gpuPreprocessor?.Dispose();
+        _gpuPreprocessor = null;
+    }
+    
+    /// <summary>
+    /// Update GPU preprocessing settings at runtime
+    /// </summary>
+    public void UpdateGPUPreprocessingSettings(AprilTagGPUPreprocessor.PreprocessingSettings newSettings)
+    {
+        gpuPreprocessingSettings = newSettings;
+        
+        if (_gpuPreprocessor != null)
+        {
+            _gpuPreprocessor.UpdateSettings(newSettings);
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log("[AprilTag] GPU preprocessing settings updated");
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Toggle GPU preprocessing at runtime
+    /// </summary>
+    public void SetGPUPreprocessingEnabled(bool enabled)
+    {
+        enableGPUPreprocessing = enabled;
+        
+        if (!enabled && _gpuPreprocessor != null)
+        {
+            _gpuPreprocessor.Dispose();
+            _gpuPreprocessor = null;
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log("[AprilTag] GPU preprocessing disabled");
+            }
+        }
+        else if (enabled && enableAllDebugLogging)
+        {
+            Debug.Log("[AprilTag] GPU preprocessing enabled - will initialize on next frame");
+        }
     }
 
     private WebCamTexture GetActiveWebCamTexture()
@@ -2367,6 +2544,28 @@ public class AprilTagController : MonoBehaviour
             
             // Final fallback to 3D pose estimation
             return tagPose.Position * positionScaleFactor;
+        }
+    }
+    
+    private void SaveDebugImage(Color32[] pixels, int width, int height)
+    {
+        try
+        {
+            var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            
+            var bytes = tex.EncodeToPNG();
+            var path = System.IO.Path.Combine(Application.dataPath, "..", "AprilTag_Debug.png");
+            System.IO.File.WriteAllBytes(path, bytes);
+            
+            Debug.Log($"[AprilTag] Saved debug image to: {path}");
+            
+            Destroy(tex);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[AprilTag] Failed to save debug image: {e.Message}");
         }
     }
 }

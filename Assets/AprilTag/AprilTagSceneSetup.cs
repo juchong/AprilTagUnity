@@ -81,6 +81,8 @@ public class AprilTagSceneSetup : MonoBehaviour
     [SerializeField] private bool autoFindEnvironmentRaycastManager = true;
     [SerializeField] private EnvironmentRaycastManager environmentRaycastManager;
     [SerializeField] private bool createSimpleEnvironmentRaycastManager = true;
+    [SerializeField] private bool setupCenterEyeAnchor = true;
+    [SerializeField] private GameObject centerEyeAnchor;
 
     void Awake()
     {
@@ -218,6 +220,12 @@ public class AprilTagSceneSetup : MonoBehaviour
             var enableQuestDebuggingField = controllerType.GetField("enableQuestDebugging", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             
+            // GPU preprocessing fields
+            var enableGPUPreprocessingField = controllerType.GetField("enableGPUPreprocessing", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var gpuPreprocessingSettingsField = controllerType.GetField("gpuPreprocessingSettings", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
             // PhotonVision-inspired filtering fields
             var enablePoseSmoothingField = controllerType.GetField("enablePoseSmoothing", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -250,6 +258,35 @@ public class AprilTagSceneSetup : MonoBehaviour
             maxDetectionDistanceField?.SetValue(controller, maxDetectionDistance);
             enableDistanceScalingField?.SetValue(controller, enableDistanceScaling);
             enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
+            
+            // Apply GPU preprocessing settings (start disabled for initial testing)
+            enableGPUPreprocessingField?.SetValue(controller, false); // Start with GPU preprocessing disabled until verified working
+            
+            // Create and configure GPU preprocessing settings
+            if (gpuPreprocessingSettingsField != null)
+            {
+                var settingsType = System.Type.GetType("AprilTag.AprilTagGPUPreprocessor+PreprocessingSettings, Assembly-CSharp");
+                if (settingsType != null)
+                {
+                    var settings = System.Activator.CreateInstance(settingsType);
+                    
+                    // Configure optimal settings for Quest
+                    var enableAdaptiveThresholdField = settingsType.GetField("enableAdaptiveThreshold");
+                    var enableHistogramEqualizationField = settingsType.GetField("enableHistogramEqualization");
+                    var enableNoiseReductionField = settingsType.GetField("enableNoiseReduction");
+                    var enableEdgeEnhancementField = settingsType.GetField("enableEdgeEnhancement");
+                    var useHalfPrecisionField = settingsType.GetField("useHalfPrecision");
+                    
+                    // Enable working features, disable problematic ones
+                    enableAdaptiveThresholdField?.SetValue(settings, false); // Binary output can be too aggressive
+                    enableHistogramEqualizationField?.SetValue(settings, true); // Working feature
+                    enableNoiseReductionField?.SetValue(settings, true); // Working feature
+                    enableEdgeEnhancementField?.SetValue(settings, false); // Problematic - causes crashes
+                    useHalfPrecisionField?.SetValue(settings, true); // Better performance on Quest
+                    
+                    gpuPreprocessingSettingsField.SetValue(controller, settings);
+                }
+            }
             
             // Apply PhotonVision-inspired filtering settings (enabled by default for better accuracy)
             enablePoseSmoothingField?.SetValue(controller, true);
@@ -620,6 +657,11 @@ public class AprilTagSceneSetup : MonoBehaviour
     [ContextMenu("Setup Quest-Specific Features")]
     public void SetupQuestSpecificFeatures()
     {
+        // Setup Center Eye Anchor
+        if (setupCenterEyeAnchor)
+        {
+            SetupCenterEyeAnchor();
+        }
 
         // Setup Environment Raycast Manager
         if (createEnvironmentRaycastManager)
@@ -639,6 +681,59 @@ public class AprilTagSceneSetup : MonoBehaviour
         // Update AprilTag Controller with Quest settings
         UpdateAprilTagControllerWithQuestSettings();
 
+    }
+    
+    private void SetupCenterEyeAnchor()
+    {
+        // Try to find existing CenterEyeAnchor
+        if (centerEyeAnchor == null)
+        {
+            // Look for XROrigin first
+            var xrOrigin = FindFirstObjectByType<Unity.XR.CoreUtils.XROrigin>();
+            if (xrOrigin != null && xrOrigin.Camera != null)
+            {
+                // Found XROrigin with camera - this is our center eye
+                centerEyeAnchor = xrOrigin.Camera.gameObject;
+                Debug.Log($"[AprilTagSceneSetup] Found CenterEyeAnchor from XROrigin: {centerEyeAnchor.name}");
+            }
+            else
+            {
+                // Look for OVRCameraRig (older Oculus Integration)
+                var ovrCameraRig = GameObject.Find("OVRCameraRig");
+                if (ovrCameraRig != null)
+                {
+                    var centerEye = ovrCameraRig.transform.Find("TrackingSpace/CenterEyeAnchor");
+                    if (centerEye != null)
+                    {
+                        centerEyeAnchor = centerEye.gameObject;
+                        Debug.Log($"[AprilTagSceneSetup] Found CenterEyeAnchor from OVRCameraRig: {centerEyeAnchor.name}");
+                    }
+                }
+            }
+            
+            // Final fallback - look for main camera
+            if (centerEyeAnchor == null && Camera.main != null)
+            {
+                centerEyeAnchor = Camera.main.gameObject;
+                Debug.Log($"[AprilTagSceneSetup] Using Main Camera as CenterEyeAnchor: {centerEyeAnchor.name}");
+            }
+            
+            if (centerEyeAnchor == null)
+            {
+                Debug.LogWarning("[AprilTagSceneSetup] Could not find CenterEyeAnchor. Please ensure XROrigin or OVRCameraRig is in the scene.");
+            }
+        }
+        
+        // Update reference camera if using center eye transform
+        if (useCenterEyeTransform && centerEyeAnchor != null)
+        {
+            var camera = centerEyeAnchor.GetComponent<Camera>();
+            if (camera != null)
+            {
+                referenceCamera = camera;
+                Debug.Log($"[AprilTagSceneSetup] Set reference camera to CenterEyeAnchor camera: {referenceCamera.name}");
+            }
+        }
     }
 
     private void SetupEnvironmentRaycastManager()
@@ -679,9 +774,25 @@ public class AprilTagSceneSetup : MonoBehaviour
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         var environmentRaycastManagerField = controllerType.GetField("environmentRaycastManager", 
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var referenceCameraField = controllerType.GetField("referenceCamera", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var useCenterEyeTransformField = controllerType.GetField("useCenterEyeTransform", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
         usePassthroughRaycastingField?.SetValue(controller, enablePassthroughRaycasting);
         environmentRaycastManagerField?.SetValue(controller, environmentRaycastManager);
+        
+        // Update reference camera from center eye anchor if available
+        if (useCenterEyeTransform && centerEyeAnchor != null)
+        {
+            var camera = centerEyeAnchor.GetComponent<Camera>();
+            if (camera != null)
+            {
+                referenceCameraField?.SetValue(controller, camera);
+                useCenterEyeTransformField?.SetValue(controller, true);
+                Debug.Log($"[AprilTagSceneSetup] Updated AprilTagController reference camera to CenterEyeAnchor: {camera.name}");
+            }
+        }
 
     }
 
@@ -689,6 +800,13 @@ public class AprilTagSceneSetup : MonoBehaviour
     public void SetupEnvironmentRaycastManagerOnly()
     {
         SetupEnvironmentRaycastManager();
+    }
+    
+    [ContextMenu("Setup Center Eye Anchor Only")]
+    public void SetupCenterEyeAnchorOnly()
+    {
+        SetupCenterEyeAnchor();
+        UpdateAprilTagControllerWithQuestSettings();
     }
 
     // User Runtime Offset Management Methods
