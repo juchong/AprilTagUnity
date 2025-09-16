@@ -7,6 +7,7 @@ using AprilTag; // For tag family enum
 using PassthroughCameraSamples;
 using Meta.XR.Samples;
 using Meta.XR;
+using System.Linq;
 
 [System.Serializable]
 public class AprilTagSceneSetup : MonoBehaviour
@@ -71,6 +72,10 @@ public class AprilTagSceneSetup : MonoBehaviour
     [Tooltip("Save user offset to PlayerPrefs for persistence")]
     [SerializeField] private bool saveUserOffsetToPersistence = true;
 
+    [Header("Quest Runtime Cleanup")]
+    [Tooltip("Enable automatic cleanup of duplicate permission panels on Quest")]
+    [SerializeField] private bool enableRuntimeCleanup = true;
+
 
     [Header("WebCam Manager Settings")]
     [SerializeField] private PassthroughCameraSamples.PassthroughCameraEye cameraEye = PassthroughCameraSamples.PassthroughCameraEye.Left;
@@ -95,6 +100,15 @@ public class AprilTagSceneSetup : MonoBehaviour
         if (setupOnAwake)
         {
             SetupCompleteAprilTagSystem();
+        }
+    }
+
+    void Start()
+    {
+        // Run cleanup on Quest if enabled
+        if (enableRuntimeCleanup)
+        {
+            CleanUpDuplicatePermissionPanels();
         }
     }
 
@@ -559,56 +573,82 @@ public class AprilTagSceneSetup : MonoBehaviour
 
     private void SetupPermissionUI()
     {
+        // Check for existing permission UI component
         var existingUI = FindFirstObjectByType<AprilTagPermissionUI>();
-        if (existingUI == null)
+        if (existingUI != null)
         {
-            // Create a simple UI canvas if none exists
-            var canvas = FindFirstObjectByType<Canvas>();
-            if (canvas == null)
+            Debug.Log("[AprilTagSceneSetup] AprilTagPermissionUI already exists, skipping creation");
+            return;
+        }
+
+        // Check for existing permission panel GameObject (even without component)
+        var existingPanel = GameObject.Find("AprilTagPermissionPanel");
+        if (existingPanel != null)
+        {
+            Debug.LogWarning("[AprilTagSceneSetup] Found existing AprilTagPermissionPanel GameObject without AprilTagPermissionUI component. Adding component to existing panel.");
+            
+            // Add the component to the existing panel
+            var existingPermissionUI = existingPanel.GetComponent<AprilTagPermissionUI>();
+            if (existingPermissionUI == null)
             {
-                var canvasGO = new GameObject("Canvas");
-                canvas = canvasGO.AddComponent<Canvas>();
-                canvas.renderMode = RenderMode.WorldSpace;
-                canvasGO.AddComponent<CanvasScaler>();
-                canvasGO.AddComponent<GraphicRaycaster>();
-                
+                existingPermissionUI = existingPanel.AddComponent<AprilTagPermissionUI>();
             }
-
-            // Create permission UI panel
-            var panelGO = new GameObject("AprilTagPermissionPanel");
-            panelGO.transform.SetParent(canvas.transform, false);
             
-            // Add UI components
-            var image = panelGO.AddComponent<UnityEngine.UI.Image>();
-            image.color = new Color(0, 0, 0, 0.8f);
-            
-            var rectTransform = panelGO.GetComponent<RectTransform>();
-            rectTransform.sizeDelta = new Vector2(400, 300);
-            rectTransform.anchoredPosition = Vector2.zero;
-
-            // Add permission UI component
-            var permissionUI = panelGO.AddComponent<AprilTagPermissionUI>();
-            
-            // Configure settings via reflection
-            var uiType = typeof(AprilTagPermissionUI);
-            var showPanelField = uiType.GetField("showPanelOnStart", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var autoHideField = uiType.GetField("autoHideOnGranted", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var hideDelayField = uiType.GetField("autoHideDelay", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            showPanelField?.SetValue(permissionUI, showPanelOnStart);
-            autoHideField?.SetValue(permissionUI, autoHideOnGranted);
-            hideDelayField?.SetValue(permissionUI, autoHideDelay);
-
-            // Initially hide the panel (it will show automatically if permissions are needed)
-            panelGO.SetActive(false);
-
+            // Configure the existing panel
+            ConfigurePermissionUI(existingPermissionUI);
+            return;
         }
-        else
+
+        // Create a simple UI canvas if none exists
+        var canvas = FindFirstObjectByType<Canvas>();
+        if (canvas == null)
         {
+            var canvasGO = new GameObject("Canvas");
+            canvas = canvasGO.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvasGO.AddComponent<CanvasScaler>();
+            canvasGO.AddComponent<GraphicRaycaster>();
+            
         }
+
+        // Create permission UI panel
+        var panelGO = new GameObject("AprilTagPermissionPanel");
+        panelGO.transform.SetParent(canvas.transform, false);
+            
+        // Add UI components
+        var image = panelGO.AddComponent<UnityEngine.UI.Image>();
+        image.color = new Color(0, 0, 0, 0.8f);
+        
+        var rectTransform = panelGO.GetComponent<RectTransform>();
+        rectTransform.sizeDelta = new Vector2(400, 300);
+        rectTransform.anchoredPosition = Vector2.zero;
+
+        // Add permission UI component
+        var permissionUI = panelGO.AddComponent<AprilTagPermissionUI>();
+        
+        // Configure the new panel
+        ConfigurePermissionUI(permissionUI);
+
+        // Initially hide the panel (it will show automatically if permissions are needed)
+        panelGO.SetActive(false);
+    }
+
+    private void ConfigurePermissionUI(AprilTagPermissionUI permissionUI)
+    {
+        if (permissionUI == null) return;
+
+        // Configure settings via reflection
+        var uiType = typeof(AprilTagPermissionUI);
+        var showPanelField = uiType.GetField("showPanelOnStart", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var autoHideField = uiType.GetField("autoHideOnGranted", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var hideDelayField = uiType.GetField("autoHideDelay", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        showPanelField?.SetValue(permissionUI, showPanelOnStart);
+        autoHideField?.SetValue(permissionUI, autoHideOnGranted);
+        hideDelayField?.SetValue(permissionUI, autoHideDelay);
     }
 
 
@@ -770,6 +810,136 @@ public class AprilTagSceneSetup : MonoBehaviour
     {
         SetupCenterEyeAnchor();
         UpdateAprilTagControllerWithQuestSettings();
+    }
+
+    /// <summary>
+    /// Quest-compatible method to clean up duplicate permission panels
+    /// Call this from other scripts or UI buttons on Quest
+    /// </summary>
+    public void CleanUpDuplicatePanelsOnQuest()
+    {
+        CleanUpDuplicatePermissionPanels();
+    }
+
+    /// <summary>
+    /// Static method to clean up duplicate permission panels from anywhere
+    /// </summary>
+    public static void CleanUpDuplicatePermissionPanelsStatic()
+    {
+        // Find all AprilTagPermissionPanel GameObjects
+        var allPanels = GameObject.FindGameObjectsWithTag("Untagged")
+            .Where(go => go.name == "AprilTagPermissionPanel")
+            .ToArray();
+
+        if (allPanels.Length <= 1)
+        {
+            Debug.Log("[AprilTagSceneSetup] No duplicate permission panels found");
+            return;
+        }
+
+        Debug.Log($"[AprilTagSceneSetup] Found {allPanels.Length} permission panels, cleaning up duplicates...");
+
+        // Keep the first one with a valid AprilTagPermissionUI component
+        GameObject keepPanel = null;
+        for (int i = 0; i < allPanels.Length; i++)
+        {
+            var ui = allPanels[i].GetComponent<AprilTagPermissionUI>();
+            if (ui != null)
+            {
+                keepPanel = allPanels[i];
+                break;
+            }
+        }
+
+        // If no panel has the component, keep the first one and add the component
+        if (keepPanel == null)
+        {
+            keepPanel = allPanels[0];
+            keepPanel.AddComponent<AprilTagPermissionUI>();
+            
+            // Get a scene setup instance to configure the UI
+            var sceneSetup = FindFirstObjectByType<AprilTagSceneSetup>();
+            if (sceneSetup != null)
+            {
+                sceneSetup.ConfigurePermissionUI(keepPanel.GetComponent<AprilTagPermissionUI>());
+            }
+        }
+
+        // Destroy all other panels
+        int destroyedCount = 0;
+        for (int i = 0; i < allPanels.Length; i++)
+        {
+            if (allPanels[i] != keepPanel)
+            {
+                if (Application.isPlaying)
+                {
+                    Destroy(allPanels[i]);
+                }
+                else
+                {
+                    DestroyImmediate(allPanels[i]);
+                }
+                destroyedCount++;
+            }
+        }
+
+        Debug.Log($"[AprilTagSceneSetup] Cleaned up {destroyedCount} duplicate permission panels. Kept: {keepPanel.name}");
+    }
+
+    private void CleanUpDuplicatePermissionPanels()
+    {
+        // Find all AprilTagPermissionPanel GameObjects
+        var allPanels = GameObject.FindGameObjectsWithTag("Untagged")
+            .Where(go => go.name == "AprilTagPermissionPanel")
+            .ToArray();
+
+        if (allPanels.Length <= 1)
+        {
+            Debug.Log("[AprilTagSceneSetup] No duplicate permission panels found");
+            return;
+        }
+
+        Debug.Log($"[AprilTagSceneSetup] Found {allPanels.Length} permission panels, cleaning up duplicates...");
+
+        // Keep the first one with a valid AprilTagPermissionUI component
+        GameObject keepPanel = null;
+        for (int i = 0; i < allPanels.Length; i++)
+        {
+            var ui = allPanels[i].GetComponent<AprilTagPermissionUI>();
+            if (ui != null)
+            {
+                keepPanel = allPanels[i];
+                break;
+            }
+        }
+
+        // If no panel has the component, keep the first one and add the component
+        if (keepPanel == null)
+        {
+            keepPanel = allPanels[0];
+            keepPanel.AddComponent<AprilTagPermissionUI>();
+            ConfigurePermissionUI(keepPanel.GetComponent<AprilTagPermissionUI>());
+        }
+
+        // Destroy all other panels
+        int destroyedCount = 0;
+        for (int i = 0; i < allPanels.Length; i++)
+        {
+            if (allPanels[i] != keepPanel)
+            {
+                if (Application.isPlaying)
+                {
+                    Destroy(allPanels[i]);
+                }
+                else
+                {
+                    DestroyImmediate(allPanels[i]);
+                }
+                destroyedCount++;
+            }
+        }
+
+        Debug.Log($"[AprilTagSceneSetup] Cleaned up {destroyedCount} duplicate permission panels. Kept: {keepPanel.name}");
     }
 
     // User Runtime Offset Management Methods
