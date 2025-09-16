@@ -73,11 +73,17 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Horizontal FOV (degrees) of the passthrough camera.")]
     [SerializeField] private float horizontalFovDeg = 78f;
 
+    [Header("Calibration Offsets")]
+    [Tooltip("Enable position offset")]
+    [SerializeField] private bool enablePositionOffset = true;
+    [Tooltip("Enable rotation offset")]
+    [SerializeField] private bool enableRotationOffset = true;
+
     [Header("Diagnostics")]
     [Tooltip("Enable all debug logging (can be toggled at runtime)")]
     [SerializeField] private bool enableAllDebugLogging = true;
     [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
-    [SerializeField] private bool enableConfigurationTool = true;
+    [SerializeField] private bool enableConfigurationTool = false; // Disabled by default to avoid input conflicts
     
     [Header("GPU Preprocessing")]
     [Tooltip("Enable GPU-accelerated image preprocessing for better detection quality")]
@@ -99,13 +105,22 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Number of frames to validate against")]
     [SerializeField] private int validationFrameCount = 3;
     [Tooltip("Maximum position deviation for validation (meters)")]
-    [SerializeField] private float maxPositionDeviation = 0.05f;
+    [SerializeField] private float maxPositionDeviation = 0.2f; // Increased from 0.05f for Quest jitter
     [Tooltip("Maximum rotation deviation for validation (degrees)")]
-    [SerializeField] private float maxRotationDeviation = 15f;
+    [SerializeField] private float maxRotationDeviation = 30f; // Increased from 15f for Quest jitter
     [Tooltip("Enable corner quality assessment")]
     [SerializeField] private bool enableCornerQualityAssessment = true;
     [Tooltip("Minimum corner quality threshold (0-1)")]
     [SerializeField] private float minCornerQuality = 0.3f;
+
+    [Header("Spatial Anchors")]
+    [Tooltip("Enable spatial anchor creation for detected tags")]
+    [SerializeField] private bool enableSpatialAnchors = true;
+    [Tooltip("Spatial anchor manager component (auto-created if null)")]
+    [SerializeField] private AprilTagSpatialAnchorManager spatialAnchorManager;
+    [Tooltip("Detection confidence threshold for anchor placement (0.0 - 1.0)")]
+    [Range(0.0f, 1.0f)]
+    [SerializeField] private float anchorConfidenceThreshold = 0.1f; // Lowered to allow low-confidence tags
 
     // CPU buffers
     private Color32[] _rgba;
@@ -195,6 +210,63 @@ public class AprilTagController : MonoBehaviour
             if (environmentRaycastManager == null && enableAllDebugLogging)
             {
                 Debug.LogWarning("[AprilTag] No EnvironmentRaycastManager found. Passthrough raycasting will not work properly. Please assign one or disable usePassthroughRaycasting.");
+            }
+        }
+        
+        // Initialize spatial anchor manager
+        InitializeSpatialAnchorManager();
+    }
+    
+    /// <summary>
+    /// Initialize the spatial anchor manager for tag-based anchor creation
+    /// </summary>
+    private void InitializeSpatialAnchorManager()
+    {
+        if (!enableSpatialAnchors) return;
+        
+        // Find or create spatial anchor manager if not assigned
+        if (spatialAnchorManager == null)
+        {
+            // First try to find existing manager in the scene
+            spatialAnchorManager = FindFirstObjectByType<AprilTagSpatialAnchorManager>();
+            
+            // If not found, try as a component on this object
+            if (spatialAnchorManager == null)
+            {
+                spatialAnchorManager = GetComponent<AprilTagSpatialAnchorManager>();
+            }
+            
+            // If still not found, create one as a component (fallback)
+            if (spatialAnchorManager == null)
+            {
+                spatialAnchorManager = gameObject.AddComponent<AprilTagSpatialAnchorManager>();
+                
+                if (enableAllDebugLogging)
+                {
+                    Debug.Log("[AprilTag] Created AprilTagSpatialAnchorManager as component (fallback)");
+                }
+            }
+            else
+            {
+                if (enableAllDebugLogging)
+                {
+                    Debug.Log("[AprilTag] Found existing AprilTagSpatialAnchorManager in scene");
+                }
+            }
+        }
+        
+        // Configure the spatial anchor manager
+        if (spatialAnchorManager != null)
+        {
+            // Use reflection to set the confidence threshold
+            var managerType = typeof(AprilTagSpatialAnchorManager);
+            var confidenceField = managerType.GetField("minConfidenceThreshold", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            confidenceField?.SetValue(spatialAnchorManager, anchorConfidenceThreshold);
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Spatial anchor manager initialized with confidence threshold: {anchorConfidenceThreshold}");
             }
         }
     }
@@ -494,7 +566,13 @@ public class AprilTagController : MonoBehaviour
             {
                 // Use corner-based positioning which works better with Quest's coordinate system
                 worldPosition = GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t) + cornerPositionOffset;
-                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
+                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition);
+                
+                // Apply rotation offset if enabled
+                if (enableRotationOffset)
+                {
+                    worldRotation *= Quaternion.Euler(rotationOffset);
+                }
                 
                 if (enableAllDebugLogging && detectedCount != _previousTagCount)
                 {
@@ -512,7 +590,11 @@ public class AprilTagController : MonoBehaviour
                 var cam = GetCorrectCameraReference();
                 
                 // Apply position offset and scaling
-                var adjustedPosition = (t.Position + positionOffset) * positionScaleFactor;
+                var adjustedPosition = t.Position * positionScaleFactor;
+                if (enablePositionOffset)
+                {
+                    adjustedPosition += positionOffset;
+                }
                 
                 // Apply distance scaling if enabled
                 if (enableDistanceScaling)
@@ -524,7 +606,13 @@ public class AprilTagController : MonoBehaviour
                 
                 // Transform from camera space to world space
                 worldPosition = cam.position + cam.rotation * adjustedPosition;
-                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
+                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition);
+                
+                // Apply rotation offset if enabled
+                if (enableRotationOffset)
+                {
+                    worldRotation *= Quaternion.Euler(rotationOffset);
+                }
                 
                 if (enableAllDebugLogging && detectedCount != _previousTagCount)
                 {
@@ -612,9 +700,217 @@ public class AprilTagController : MonoBehaviour
         // Update previous tag count for next frame
         _previousTagCount = detectedCount;
 
+        // Process spatial anchors for detected tags
+        ProcessSpatialAnchors(seen);
+
         // Hide those not seen this frame
         foreach (var kv in _vizById)
             if (!seen.Contains(kv.Key) && kv.Value) kv.Value.gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Process spatial anchors for detected tags
+    /// </summary>
+    private void ProcessSpatialAnchors(HashSet<int> seenTags)
+    {
+        if (!enableSpatialAnchors || spatialAnchorManager == null) return;
+        
+        if (enableAllDebugLogging && Time.frameCount % 60 == 0) // Log every 60 frames (1 second at 60fps)
+        {
+            Debug.Log($"[AprilTag] ProcessSpatialAnchors: Processing {_detector.DetectedTags.Count()} detected tags");
+            foreach (var tag in _detector.DetectedTags)
+            {
+                Debug.Log($"[AprilTag]   - Tag {tag.ID} at position {tag.Position}");
+            }
+        }
+        
+        // Process each detected tag for spatial anchor creation
+        foreach (var tag in _detector.DetectedTags)
+        {
+            // Calculate confidence based on corner quality and detection stability
+            float confidence = CalculateDetectionConfidence(tag);
+            
+            // Debug logging for confidence values
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Tag {tag.ID} confidence: {confidence:F3} (threshold: {anchorConfidenceThreshold:F3})");
+            }
+            
+            // Get the filtered pose for this tag
+            Vector3 worldPosition;
+            Quaternion worldRotation;
+            
+            if (_filteredPoses.TryGetValue(tag.ID, out var filteredPose) && filteredPose.isInitialized)
+            {
+                worldPosition = filteredPose.filteredPosition;
+                worldRotation = filteredPose.filteredRotation;
+            }
+            else
+            {
+                // Fallback to raw pose if no filtered pose available
+                worldPosition = CalculateWorldPosition(tag);
+                worldRotation = CalculateWorldRotation(tag);
+            }
+            
+            // Process the tag detection for spatial anchor creation
+            spatialAnchorManager.ProcessTagDetection(tag.ID, worldPosition, worldRotation, confidence, tagSizeMeters);
+        }
+        
+        // Remove tracking for tags that are no longer detected
+        var currentTagIds = new HashSet<int>(_detector.DetectedTags.Select(t => t.ID));
+        var trackedTagIds = new HashSet<int>(_filteredPoses.Keys);
+        
+        foreach (var tagId in trackedTagIds)
+        {
+            if (!currentTagIds.Contains(tagId))
+            {
+                spatialAnchorManager.RemoveTagTracking(tagId);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Calculate detection confidence for a tag based on various factors
+    /// </summary>
+    private float CalculateDetectionConfidence(TagPose tag)
+    {
+        float confidence = 1.0f; // Start with maximum confidence
+        
+        if (enableAllDebugLogging)
+        {
+            Debug.Log($"[AprilTag] Calculating confidence for tag {tag.ID}:");
+        }
+        
+        // Apply corner quality assessment if enabled
+        if (enableCornerQualityAssessment)
+        {
+            // Use a simplified corner quality calculation
+            // In a real implementation, you might want to access actual corner quality data
+            float cornerQuality = Mathf.Clamp01(1.0f - (tag.Position.magnitude * 0.01f)); // Much gentler distance-based quality
+            confidence *= cornerQuality;
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag]   Corner quality: {cornerQuality:F3}, confidence after: {confidence:F3}");
+            }
+        }
+        
+        // Apply multi-frame validation confidence
+        if (enableMultiFrameValidation && _detectionHistory.TryGetValue(tag.ID, out var history))
+        {
+            float validationConfidence = CalculateValidationConfidence(history);
+            confidence *= validationConfidence;
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag]   Validation confidence: {validationConfidence:F3}, confidence after: {confidence:F3}");
+            }
+        }
+        
+        // Apply pose smoothing confidence
+        if (enablePoseSmoothing && _filteredPoses.TryGetValue(tag.ID, out var filteredPose))
+        {
+            if (filteredPose.isInitialized)
+            {
+                // Higher confidence for more stable poses - much gentler decay
+                float stabilityConfidence = Mathf.Clamp01(1.0f - (Time.time - filteredPose.lastUpdateTime) * 0.01f);
+                confidence *= stabilityConfidence;
+                
+                if (enableAllDebugLogging)
+                {
+                    Debug.Log($"[AprilTag]   Stability confidence: {stabilityConfidence:F3}, confidence after: {confidence:F3}");
+                }
+            }
+        }
+        
+        // Ensure minimum confidence to prevent 0.0f values
+        float finalConfidence = Mathf.Clamp01(confidence);
+        if (finalConfidence < 0.1f) // Minimum 10% confidence
+        {
+            finalConfidence = 0.1f;
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Confidence clamped to minimum 0.1f for tag {tag.ID} (was {confidence:F3})");
+            }
+        }
+        
+        return finalConfidence;
+    }
+    
+    /// <summary>
+    /// Calculate validation confidence based on detection history
+    /// </summary>
+    private float CalculateValidationConfidence(Queue<TagDetectionHistory> history)
+    {
+        if (history.Count < 2) return 0.5f; // Low confidence for single detections
+        
+        var recentDetections = history.Take(validationFrameCount).ToList();
+        if (recentDetections.Count < 2) return 0.5f;
+        
+        // Calculate position consistency
+        float positionVariance = 0f;
+        float rotationVariance = 0f;
+        
+        for (int i = 1; i < recentDetections.Count; i++)
+        {
+            positionVariance += Vector3.Distance(recentDetections[i].position, recentDetections[i-1].position);
+            rotationVariance += Quaternion.Angle(recentDetections[i].rotation, recentDetections[i-1].rotation);
+        }
+        
+        positionVariance /= (recentDetections.Count - 1);
+        rotationVariance /= (recentDetections.Count - 1);
+        
+        // Convert variance to confidence (lower variance = higher confidence)
+        float positionConfidence = Mathf.Clamp01(1.0f - (positionVariance / maxPositionDeviation));
+        float rotationConfidence = Mathf.Clamp01(1.0f - (rotationVariance / maxRotationDeviation));
+        
+        float finalConfidence = (positionConfidence + rotationConfidence) * 0.5f;
+        
+        if (enableAllDebugLogging)
+        {
+            Debug.Log($"[AprilTag] Validation confidence calculation:");
+            Debug.Log($"[AprilTag]   Position variance: {positionVariance:F3}m, max: {maxPositionDeviation:F3}m, confidence: {positionConfidence:F3}");
+            Debug.Log($"[AprilTag]   Rotation variance: {rotationVariance:F1}°, max: {maxRotationDeviation:F1}°, confidence: {rotationConfidence:F3}");
+            Debug.Log($"[AprilTag]   Final validation confidence: {finalConfidence:F3}");
+        }
+        
+        return finalConfidence;
+    }
+    
+    /// <summary>
+    /// Calculate world position for a tag (fallback method)
+    /// </summary>
+    private Vector3 CalculateWorldPosition(TagPose tag)
+    {
+        // Use the existing world position calculation logic
+        var camRef = GetCorrectCameraReference();
+        if (camRef != null)
+        {
+            // Convert AprilTag position to world space
+            var adjustedPosition = camRef.rotation * tag.Position;
+            return camRef.position + adjustedPosition + positionOffset;
+        }
+        
+        // Fallback to tag position if no camera reference
+        return tag.Position + positionOffset;
+    }
+    
+    /// <summary>
+    /// Calculate world rotation for a tag (fallback method)
+    /// </summary>
+    private Quaternion CalculateWorldRotation(TagPose tag)
+    {
+        // Use the existing world rotation calculation logic
+        var camRef = GetCorrectCameraReference();
+        if (camRef != null)
+        {
+            // Convert AprilTag rotation to world space
+            var adjustedRotation = camRef.rotation * tag.Rotation;
+            return adjustedRotation * Quaternion.Euler(rotationOffset);
+        }
+        
+        // Fallback to tag rotation if no camera reference
+        return tag.Rotation * Quaternion.Euler(rotationOffset);
     }
 
     private void RecreateDetectorIfNeeded(int width, int height, int dec)

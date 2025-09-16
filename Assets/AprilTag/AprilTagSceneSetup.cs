@@ -46,14 +46,16 @@ public class AprilTagSceneSetup : MonoBehaviour
     [SerializeField] private Camera referenceCamera;
     [SerializeField] private Vector3 positionOffset = Vector3.zero;
     [SerializeField] private Vector3 rotationOffset = Vector3.zero;
+    [SerializeField] private bool enablePositionOffset = true;
+    [SerializeField] private bool enableRotationOffset = true;
     [SerializeField] private bool useCenterEyeTransform = true;
     [SerializeField] private float cameraHeightOffset = 0.0f;
     [SerializeField] private bool enableIPDCompensation = true;
     
     [Header("Tuned Configuration (Default Values)")]
     [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.000f, 0.000f, 0.000f);
-    [SerializeField] private bool enableConfigurationTool = true;
-    [SerializeField] private bool enableAllDebugLogging = false;
+    [SerializeField] private bool enableConfigurationTool = false;
+    [SerializeField] private bool enableAllDebugLogging = true;
     [SerializeField] private bool usePassthroughRaycasting = true;
     [SerializeField] private bool ignoreOcclusion = true;
     [SerializeField] private float positionScaleFactor = 1.0f;
@@ -88,6 +90,22 @@ public class AprilTagSceneSetup : MonoBehaviour
     [SerializeField] private bool createSimpleEnvironmentRaycastManager = true;
     [SerializeField] private bool setupCenterEyeAnchor = true;
     [SerializeField] private GameObject centerEyeAnchor;
+
+    [Header("Spatial Anchors")]
+    [SerializeField] private bool createSpatialAnchorManager = true; // Default enabled
+    [SerializeField] private bool enableSpatialAnchors = true;
+    [SerializeField] private float anchorConfidenceThreshold = 0.1f; // Lowered to allow low-confidence tags
+    [SerializeField] private int requiredStableFrames = 1; // Reduced to allow single-frame detections
+    [SerializeField] private float maxDetectionTimeout = 10f;
+    [SerializeField] private bool persistAnchors = true;
+    [SerializeField] private bool enableClearAnchorsInput = true;
+    [SerializeField] private GameObject anchorPrefab;
+    
+    [Header("Keep Out Zone Settings")]
+    [SerializeField] private bool enableKeepOutZone = true; // Re-enabled with appropriate settings for 16.5cm tags
+    [SerializeField] private float keepOutZoneMultiplier = 0.3f; // Very small multiplier for 16.5cm tags
+    [SerializeField] private float minKeepOutRadius = 0.02f; // 2cm minimum
+    [SerializeField] private float maxKeepOutRadius = 0.1f; // 10cm maximum
 
     void Awake()
     {
@@ -138,6 +156,12 @@ public class AprilTagSceneSetup : MonoBehaviour
         if (createAprilTagController)
         {
             SetupAprilTagController();
+        }
+
+        // Create or configure Spatial Anchor Manager
+        if (createSpatialAnchorManager)
+        {
+            SetupSpatialAnchorManager();
         }
 
         // Connect to WebCam Manager if available
@@ -205,6 +229,10 @@ public class AprilTagSceneSetup : MonoBehaviour
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var rotationOffsetField = controllerType.GetField("rotationOffset", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enablePositionOffsetField = controllerType.GetField("enablePositionOffset", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableRotationOffsetField = controllerType.GetField("enableRotationOffset", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var useCenterEyeTransformField = controllerType.GetField("useCenterEyeTransform", 
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var cameraHeightOffsetField = controllerType.GetField("cameraHeightOffset", 
@@ -261,6 +289,8 @@ public class AprilTagSceneSetup : MonoBehaviour
             referenceCameraField?.SetValue(controller, referenceCamera);
             positionOffsetField?.SetValue(controller, positionOffset);
             rotationOffsetField?.SetValue(controller, rotationOffset);
+            enablePositionOffsetField?.SetValue(controller, enablePositionOffset);
+            enableRotationOffsetField?.SetValue(controller, enableRotationOffset);
             useCenterEyeTransformField?.SetValue(controller, useCenterEyeTransform);
             cameraHeightOffsetField?.SetValue(controller, cameraHeightOffset);
             enableIPDCompensationField?.SetValue(controller, enableIPDCompensation);
@@ -272,6 +302,34 @@ public class AprilTagSceneSetup : MonoBehaviour
             maxDetectionDistanceField?.SetValue(controller, maxDetectionDistance);
             enableDistanceScalingField?.SetValue(controller, enableDistanceScaling);
             enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
+            
+            // Apply spatial anchor settings
+            var enableSpatialAnchorsField = controllerType.GetField("enableSpatialAnchors", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var anchorConfidenceThresholdField = controllerType.GetField("anchorConfidenceThreshold", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            enableSpatialAnchorsField?.SetValue(controller, enableSpatialAnchors);
+            anchorConfidenceThresholdField?.SetValue(controller, anchorConfidenceThreshold);
+            
+            // Connect to spatial anchor manager if it exists
+            var spatialAnchorManager = FindFirstObjectByType<AprilTagSpatialAnchorManager>();
+            if (spatialAnchorManager != null)
+            {
+                // Connect the spatial anchor manager to the controller
+                var spatialAnchorManagerField = controllerType.GetField("spatialAnchorManager", 
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                spatialAnchorManagerField?.SetValue(controller, spatialAnchorManager);
+                
+                if (enableAllDebugLogging)
+                {
+                    Debug.Log("[AprilTagSceneSetup] Connected AprilTag Controller to Spatial Anchor Manager");
+                }
+            }
+            else if (enableSpatialAnchors)
+            {
+                Debug.LogWarning("[AprilTagSceneSetup] Spatial anchors enabled but no Spatial Anchor Manager found. Make sure createSpatialAnchorManager is enabled.");
+            }
             
             // Apply GPU preprocessing settings (start disabled for initial testing)
             enableGPUPreprocessingField?.SetValue(controller, false); // Start with GPU preprocessing disabled until verified working
@@ -340,6 +398,79 @@ public class AprilTagSceneSetup : MonoBehaviour
         }
         else
         {
+        }
+    }
+
+    private void SetupSpatialAnchorManager()
+    {
+        var existingManager = FindFirstObjectByType<AprilTagSpatialAnchorManager>();
+        if (existingManager == null)
+        {
+            // Create new Spatial Anchor Manager
+            var managerGO = new GameObject("AprilTagSpatialAnchorManager");
+            var manager = managerGO.AddComponent<AprilTagSpatialAnchorManager>();
+
+            // Configure settings via reflection
+            var managerType = typeof(AprilTagSpatialAnchorManager);
+            
+            // Set spatial anchor settings
+            var enableSpatialAnchorsField = managerType.GetField("enableSpatialAnchors", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var minConfidenceThresholdField = managerType.GetField("minConfidenceThreshold", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var requiredStableFramesField = managerType.GetField("requiredStableFrames", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var maxDetectionTimeoutField = managerType.GetField("maxDetectionTimeout", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var persistAnchorsField = managerType.GetField("persistAnchors", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableClearAnchorsInputField = managerType.GetField("enableClearAnchorsInput", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var anchorPrefabField = managerType.GetField("anchorPrefab", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var enableDebugLoggingField = managerType.GetField("enableDebugLogging", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            // Set keep out zone settings
+            var enableKeepOutZoneField = managerType.GetField("enableKeepOutZone", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var keepOutZoneMultiplierField = managerType.GetField("keepOutZoneMultiplier", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var minKeepOutRadiusField = managerType.GetField("minKeepOutRadius", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var maxKeepOutRadiusField = managerType.GetField("maxKeepOutRadius", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            // Apply spatial anchor settings
+            enableSpatialAnchorsField?.SetValue(manager, enableSpatialAnchors);
+            minConfidenceThresholdField?.SetValue(manager, anchorConfidenceThreshold);
+            requiredStableFramesField?.SetValue(manager, requiredStableFrames);
+            maxDetectionTimeoutField?.SetValue(manager, maxDetectionTimeout);
+            persistAnchorsField?.SetValue(manager, persistAnchors);
+            enableClearAnchorsInputField?.SetValue(manager, enableClearAnchorsInput);
+            anchorPrefabField?.SetValue(manager, anchorPrefab);
+            enableDebugLoggingField?.SetValue(manager, enableAllDebugLogging);
+            
+            // Apply keep out zone settings
+            enableKeepOutZoneField?.SetValue(manager, enableKeepOutZone);
+            keepOutZoneMultiplierField?.SetValue(manager, keepOutZoneMultiplier);
+            minKeepOutRadiusField?.SetValue(manager, minKeepOutRadius);
+            maxKeepOutRadiusField?.SetValue(manager, maxKeepOutRadius);
+
+            // Position the manager appropriately
+            managerGO.transform.position = Vector3.zero;
+
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTagSceneSetup] Created Spatial Anchor Manager with keep out zones enabled: {enableKeepOutZone}");
+            }
+        }
+        else
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.Log("[AprilTagSceneSetup] Spatial Anchor Manager already exists, skipping creation");
+            }
         }
     }
 
