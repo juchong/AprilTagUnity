@@ -1,0 +1,83 @@
+// AprilTag Histogram Equalization Compute Shader
+// Implements GPU-accelerated histogram equalization for contrast enhancement
+
+#pragma kernel CSCalculateHistogram
+#pragma kernel CSApplyHistogram
+
+// Input/Output textures
+Texture2D<float> _SourceTex;
+RWTexture2D<float> _ResultTex;
+
+// Histogram buffer (256 bins for 8-bit grayscale)
+RWStructuredBuffer<uint> _Histogram;
+
+// Parameters
+float _Strength;
+int _ImagePixelCount;
+
+// Shared memory for histogram calculation
+groupshared uint localHistogram[256];
+
+[numthreads(32, 32, 1)]
+void CSCalculateHistogram(uint3 id : SV_DispatchThreadID, uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    // Initialize shared memory
+    uint localIndex = groupThreadId.y * 32 + groupThreadId.x;
+    if (localIndex < 256)
+    {
+        localHistogram[localIndex] = 0;
+    }
+    
+    GroupMemoryBarrierWithGroupSync();
+    
+    // Get texture dimensions
+    uint width, height;
+    _SourceTex.GetDimensions(width, height);
+    
+    if (id.x < width && id.y < height)
+    {
+        // Read pixel value and convert to 0-255 range
+        float pixelValue = _SourceTex[id.xy].r;
+        uint bin = (uint)(saturate(pixelValue) * 255.0);
+        
+        // Atomic add to local histogram
+        InterlockedAdd(localHistogram[bin], 1);
+    }
+    
+    GroupMemoryBarrierWithGroupSync();
+    
+    // Write local histogram to global histogram
+    if (localIndex < 256)
+    {
+        InterlockedAdd(_Histogram[localIndex], localHistogram[localIndex]);
+    }
+}
+
+[numthreads(8, 8, 1)]
+void CSApplyHistogram(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _SourceTex.GetDimensions(width, height);
+    
+    if (id.x >= width || id.y >= height)
+        return;
+    
+    // Read original pixel value
+    float pixelValue = _SourceTex[id.xy].r;
+    uint bin = (uint)(saturate(pixelValue) * 255.0);
+    
+    // Calculate cumulative distribution function (CDF)
+    float cdf = 0;
+    for (uint i = 0; i <= bin; i++)
+    {
+        cdf += (float)_Histogram[i] / (float)_ImagePixelCount;
+    }
+    
+    // Apply histogram equalization
+    float equalized = cdf;
+    
+    // Blend with original based on strength
+    float result = lerp(pixelValue, equalized, _Strength);
+    
+    _ResultTex[id.xy] = result;
+}

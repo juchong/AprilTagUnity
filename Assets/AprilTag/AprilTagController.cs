@@ -73,11 +73,25 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Horizontal FOV (degrees) of the passthrough camera.")]
     [SerializeField] private float horizontalFovDeg = 78f;
 
+    [Header("Calibration Offsets")]
+    [Tooltip("Enable position offset")]
+    [SerializeField] private bool enablePositionOffset = true;
+    [Tooltip("Enable rotation offset")]
+    [SerializeField] private bool enableRotationOffset = true;
+
     [Header("Diagnostics")]
     [Tooltip("Enable all debug logging (can be toggled at runtime)")]
-    [SerializeField] private bool enableAllDebugLogging = false;
+    [SerializeField] private bool enableAllDebugLogging = true;
     [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
-    [SerializeField] private bool enableConfigurationTool = false;
+    [SerializeField] private bool enableConfigurationTool = false; // Disabled by default to avoid input conflicts
+    
+    [Header("GPU Preprocessing")]
+    [Tooltip("Enable GPU-accelerated image preprocessing for better detection quality")]
+    [SerializeField] private bool enableGPUPreprocessing = true; // Fixed and re-enabled
+    [Tooltip("GPU preprocessing settings")]
+    [SerializeField] private AprilTagGPUPreprocessor.PreprocessingSettings gpuPreprocessingSettings = new AprilTagGPUPreprocessor.PreprocessingSettings();
+    [Tooltip("Save preprocessed image for debugging (creates AprilTag_Debug.png in project root)")]
+    [SerializeField] private bool debugSavePreprocessedImage = false;
     
     [Header("PhotonVision-Inspired Filtering")]
     [Tooltip("Enable pose smoothing filter (reduces jitter)")]
@@ -91,16 +105,28 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Number of frames to validate against")]
     [SerializeField] private int validationFrameCount = 3;
     [Tooltip("Maximum position deviation for validation (meters)")]
-    [SerializeField] private float maxPositionDeviation = 0.05f;
+    [SerializeField] private float maxPositionDeviation = 0.2f; // Increased from 0.05f for Quest jitter
     [Tooltip("Maximum rotation deviation for validation (degrees)")]
-    [SerializeField] private float maxRotationDeviation = 15f;
+    [SerializeField] private float maxRotationDeviation = 30f; // Increased from 15f for Quest jitter
     [Tooltip("Enable corner quality assessment")]
     [SerializeField] private bool enableCornerQualityAssessment = true;
     [Tooltip("Minimum corner quality threshold (0-1)")]
     [SerializeField] private float minCornerQuality = 0.3f;
 
+    [Header("Spatial Anchors")]
+    [Tooltip("Enable spatial anchor creation for detected tags")]
+    [SerializeField] private bool enableSpatialAnchors = true;
+    [Tooltip("Spatial anchor manager component (auto-created if null)")]
+    [SerializeField] private AprilTagSpatialAnchorManager spatialAnchorManager;
+    [Tooltip("Detection confidence threshold for anchor placement (0.0 - 1.0)")]
+    [Range(0.0f, 1.0f)]
+    [SerializeField] private float anchorConfidenceThreshold = 0.1f; // Lowered to allow low-confidence tags
+
     // CPU buffers
     private Color32[] _rgba;
+    
+    // GPU preprocessor
+    private AprilTagGPUPreprocessor _gpuPreprocessor;
     
     // Headset pose tracking for continuous adjustment
     private Quaternion _lastHeadsetRotation = Quaternion.identity;
@@ -186,6 +212,63 @@ public class AprilTagController : MonoBehaviour
                 Debug.LogWarning("[AprilTag] No EnvironmentRaycastManager found. Passthrough raycasting will not work properly. Please assign one or disable usePassthroughRaycasting.");
             }
         }
+        
+        // Initialize spatial anchor manager
+        InitializeSpatialAnchorManager();
+    }
+    
+    /// <summary>
+    /// Initialize the spatial anchor manager for tag-based anchor creation
+    /// </summary>
+    private void InitializeSpatialAnchorManager()
+    {
+        if (!enableSpatialAnchors) return;
+        
+        // Find or create spatial anchor manager if not assigned
+        if (spatialAnchorManager == null)
+        {
+            // First try to find existing manager in the scene
+            spatialAnchorManager = FindFirstObjectByType<AprilTagSpatialAnchorManager>();
+            
+            // If not found, try as a component on this object
+            if (spatialAnchorManager == null)
+            {
+                spatialAnchorManager = GetComponent<AprilTagSpatialAnchorManager>();
+            }
+            
+            // If still not found, create one as a component (fallback)
+            if (spatialAnchorManager == null)
+            {
+                spatialAnchorManager = gameObject.AddComponent<AprilTagSpatialAnchorManager>();
+                
+                if (enableAllDebugLogging)
+                {
+                    Debug.Log("[AprilTag] Created AprilTagSpatialAnchorManager as component (fallback)");
+                }
+            }
+            else
+            {
+                if (enableAllDebugLogging)
+                {
+                    Debug.Log("[AprilTag] Found existing AprilTagSpatialAnchorManager in scene");
+                }
+            }
+        }
+        
+        // Configure the spatial anchor manager
+        if (spatialAnchorManager != null)
+        {
+            // Use reflection to set the confidence threshold
+            var managerType = typeof(AprilTagSpatialAnchorManager);
+            var confidenceField = managerType.GetField("minConfidenceThreshold", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            confidenceField?.SetValue(spatialAnchorManager, anchorConfidenceThreshold);
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Spatial anchor manager initialized with confidence threshold: {anchorConfidenceThreshold}");
+            }
+        }
     }
     
     void OnDestroy()
@@ -265,27 +348,142 @@ public class AprilTagController : MonoBehaviour
             if (enableAllDebugLogging) Debug.Log($"[AprilTag] Recreating detector: {wct.width}x{wct.height}, decimate={decimate}");
             RecreateDetectorIfNeeded(wct.width, wct.height, decimate);
         }
+        
+        // Ensure GPU preprocessor matches the feed dimensions
+        if (enableGPUPreprocessing)
+        {
+            if (_gpuPreprocessor == null || _detW != wct.width || _detH != wct.height)
+            {
+                _gpuPreprocessor?.Dispose();
+                _gpuPreprocessor = new AprilTagGPUPreprocessor(wct.width, wct.height, gpuPreprocessingSettings);
+                
+                if (_gpuPreprocessor.IsInitialized)
+                {
+                    if (enableAllDebugLogging) Debug.Log($"[AprilTag] Created GPU preprocessor: {wct.width}x{wct.height}");
+                }
+                else
+                {
+                    Debug.LogError("[AprilTag] Failed to initialize GPU preprocessor - falling back to CPU processing");
+                    _gpuPreprocessor = null;
+                    enableGPUPreprocessing = false;
+                }
+            }
+        }
 
-        // Get pixels directly from WebCamTexture (avoids GPU initialization issues with Graphics.CopyTexture)
+        // Get pixels - either preprocessed or raw
         try
         {
-            _rgba = wct.GetPixels32();
+            if (enableGPUPreprocessing && _gpuPreprocessor != null && _gpuPreprocessor.IsInitialized)
+            {
+                try
+                {
+                    // Process image on GPU
+                    var processedTexture = _gpuPreprocessor.ProcessTexture(wct);
+                    if (processedTexture != null)
+                    {
+                        _rgba = _gpuPreprocessor.GetProcessedPixels();
+                        if (_rgba != null && _rgba.Length > 0)
+                        {
+                            // Validate pixel count matches expected size
+                            int expectedPixels = wct.width * wct.height;
+                            if (_rgba.Length == expectedPixels)
+                            {
+                                if (enableAllDebugLogging && Time.frameCount % 60 == 0) 
+                                {
+                                    Debug.Log($"[AprilTag] GPU preprocessing completed in {_gpuPreprocessor.LastProcessingTimeMs:F2}ms, processed {_rgba.Length} pixels");
+                                }
+                                
+                                // Debug: Save preprocessed image
+                                if (debugSavePreprocessedImage && Time.frameCount % 300 == 0) // Every 5 seconds
+                                {
+                                    SaveDebugImage(_rgba, _detW, _detH);
+                                }
+                            }
+                            else
+                            {
+                                // Pixel count mismatch - fallback to raw
+                                Debug.LogError($"[AprilTag] GPU preprocessing pixel count mismatch: expected {expectedPixels}, got {_rgba.Length}. Falling back to raw pixels.");
+                                _rgba = wct.GetPixels32();
+                            }
+                        }
+                        else
+                        {
+                            // GPU processing returned no pixels, fallback to raw
+                            _rgba = wct.GetPixels32();
+                            if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] GPU preprocessing returned no pixels, using raw pixels");
+                        }
+                    }
+                    else
+                    {
+                        // Fallback to raw pixels if GPU processing failed
+                        _rgba = wct.GetPixels32();
+                        if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] GPU preprocessing texture was null, using raw pixels");
+                    }
+                }
+                catch (Exception e)
+                {
+                    // GPU processing crashed - disable it and fallback to raw
+                    Debug.LogError($"[AprilTag] GPU preprocessing crashed: {e.Message}. Disabling GPU preprocessing and using raw pixels.");
+                    enableGPUPreprocessing = false;
+                    _gpuPreprocessor?.Dispose();
+                    _gpuPreprocessor = null;
+                    _rgba = wct.GetPixels32();
+                }
+            }
+            else
+            {
+                // Get pixels directly from WebCamTexture (original path)
+                _rgba = wct.GetPixels32();
+            }
+            
             if (_rgba == null || _rgba.Length == 0)
             {
-                if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning("[AprilTag] WebCamTexture returned no pixel data");
+                if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning("[AprilTag] No pixel data available");
                 return;
             }
         }
         catch (System.Exception ex)
         {
-            if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning($"[AprilTag] Failed to get pixels from WebCamTexture: {ex.Message}");
+            if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning($"[AprilTag] Failed to get pixels: {ex.Message}");
             return;
         }
 
-        // NOTE: Correct usage � DO NOT pass _rgba to the constructor.
+        // NOTE: Correct usage – DO NOT pass _rgba to the constructor.
         // Constructor takes (width, height, decimation).
         // Detection call takes (pixels, fovDeg, tagSizeMeters).
         _detector.ProcessImage(_rgba.AsSpan(), horizontalFovDeg, tagSizeMeters);
+
+        // Debug logging for detection count
+        if (Time.frameCount % 60 == 0) // Log every second regardless of enableAllDebugLogging
+        {
+            var tagCount = _detector.DetectedTags?.Count() ?? 0;
+            if (tagCount == 0)
+            {
+                Debug.Log($"[AprilTag] No tags detected. Detector: {_detW}x{_detH}, decimation={_detDecim}, tagSize={tagSizeMeters}m, FOV={horizontalFovDeg}°, GPU={enableGPUPreprocessing}");
+                
+                // Additional debug info
+                if (Time.frameCount % 300 == 0) // Every 5 seconds
+                {
+                    Debug.Log($"[AprilTag] Detection params: Family={tagFamily}, MaxDetections/sec={maxDetectionsPerSecond}");
+                    Debug.Log($"[AprilTag] WebCamTexture: {wct?.width}x{wct?.height}, isPlaying={wct?.isPlaying}");
+                    Debug.Log($"[AprilTag] Pixel buffer size: {_rgba?.Length ?? 0}");
+                    
+                    // Check if we have a viz prefab
+                    if (!tagVizPrefab)
+                    {
+                        Debug.LogWarning("[AprilTag] WARNING: No tag visualization prefab assigned!");
+                    }
+                }
+            }
+            else
+            {
+                Debug.Log($"[AprilTag] SUCCESS! Detected {tagCount} tags!");
+                foreach (var tag in _detector.DetectedTags.Take(5)) // Log first 5 tags
+                {
+                    Debug.Log($"[AprilTag] - Tag ID: {tag.ID}, Position: {tag.Position}, Rotation: {tag.Rotation.eulerAngles}");
+                }
+            }
+        }
 
         // Visualize detected tags using corner-based positioning
         var seen = new HashSet<int>();
@@ -341,7 +539,14 @@ public class AprilTagController : MonoBehaviour
 
             if (!_vizById.TryGetValue(t.ID, out var tr) || tr == null)
             {
-                if (!tagVizPrefab) continue;
+                if (!tagVizPrefab)
+                {
+                    if (enableAllDebugLogging && Time.frameCount % 300 == 0)
+                    {
+                        Debug.LogWarning($"[AprilTag] No tag visualization prefab assigned! Cannot create visualization for tag {t.ID}");
+                    }
+                    continue;
+                }
                 tr = Instantiate(tagVizPrefab).transform;
                 tr.name = $"AprilTag_{t.ID}";
                 
@@ -361,7 +566,13 @@ public class AprilTagController : MonoBehaviour
             {
                 // Use corner-based positioning which works better with Quest's coordinate system
                 worldPosition = GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t) + cornerPositionOffset;
-                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
+                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition);
+                
+                // Apply rotation offset if enabled
+                if (enableRotationOffset)
+                {
+                    worldRotation *= Quaternion.Euler(rotationOffset);
+                }
                 
                 if (enableAllDebugLogging && detectedCount != _previousTagCount)
                 {
@@ -379,7 +590,11 @@ public class AprilTagController : MonoBehaviour
                 var cam = GetCorrectCameraReference();
                 
                 // Apply position offset and scaling
-                var adjustedPosition = (t.Position + positionOffset) * positionScaleFactor;
+                var adjustedPosition = t.Position * positionScaleFactor;
+                if (enablePositionOffset)
+                {
+                    adjustedPosition += positionOffset;
+                }
                 
                 // Apply distance scaling if enabled
                 if (enableDistanceScaling)
@@ -391,7 +606,13 @@ public class AprilTagController : MonoBehaviour
                 
                 // Transform from camera space to world space
                 worldPosition = cam.position + cam.rotation * adjustedPosition;
-                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition) * Quaternion.Euler(rotationOffset);
+                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition);
+                
+                // Apply rotation offset if enabled
+                if (enableRotationOffset)
+                {
+                    worldRotation *= Quaternion.Euler(rotationOffset);
+                }
                 
                 if (enableAllDebugLogging && detectedCount != _previousTagCount)
                 {
@@ -479,9 +700,217 @@ public class AprilTagController : MonoBehaviour
         // Update previous tag count for next frame
         _previousTagCount = detectedCount;
 
+        // Process spatial anchors for detected tags
+        ProcessSpatialAnchors(seen);
+
         // Hide those not seen this frame
         foreach (var kv in _vizById)
             if (!seen.Contains(kv.Key) && kv.Value) kv.Value.gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Process spatial anchors for detected tags
+    /// </summary>
+    private void ProcessSpatialAnchors(HashSet<int> seenTags)
+    {
+        if (!enableSpatialAnchors || spatialAnchorManager == null) return;
+        
+        if (enableAllDebugLogging && Time.frameCount % 60 == 0) // Log every 60 frames (1 second at 60fps)
+        {
+            Debug.Log($"[AprilTag] ProcessSpatialAnchors: Processing {_detector.DetectedTags.Count()} detected tags");
+            foreach (var tag in _detector.DetectedTags)
+            {
+                Debug.Log($"[AprilTag]   - Tag {tag.ID} at position {tag.Position}");
+            }
+        }
+        
+        // Process each detected tag for spatial anchor creation
+        foreach (var tag in _detector.DetectedTags)
+        {
+            // Calculate confidence based on corner quality and detection stability
+            float confidence = CalculateDetectionConfidence(tag);
+            
+            // Debug logging for confidence values
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Tag {tag.ID} confidence: {confidence:F3} (threshold: {anchorConfidenceThreshold:F3})");
+            }
+            
+            // Get the filtered pose for this tag
+            Vector3 worldPosition;
+            Quaternion worldRotation;
+            
+            if (_filteredPoses.TryGetValue(tag.ID, out var filteredPose) && filteredPose.isInitialized)
+            {
+                worldPosition = filteredPose.filteredPosition;
+                worldRotation = filteredPose.filteredRotation;
+            }
+            else
+            {
+                // Fallback to raw pose if no filtered pose available
+                worldPosition = CalculateWorldPosition(tag);
+                worldRotation = CalculateWorldRotation(tag);
+            }
+            
+            // Process the tag detection for spatial anchor creation
+            spatialAnchorManager.ProcessTagDetection(tag.ID, worldPosition, worldRotation, confidence, tagSizeMeters);
+        }
+        
+        // Remove tracking for tags that are no longer detected
+        var currentTagIds = new HashSet<int>(_detector.DetectedTags.Select(t => t.ID));
+        var trackedTagIds = new HashSet<int>(_filteredPoses.Keys);
+        
+        foreach (var tagId in trackedTagIds)
+        {
+            if (!currentTagIds.Contains(tagId))
+            {
+                spatialAnchorManager.RemoveTagTracking(tagId);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Calculate detection confidence for a tag based on various factors
+    /// </summary>
+    private float CalculateDetectionConfidence(TagPose tag)
+    {
+        float confidence = 1.0f; // Start with maximum confidence
+        
+        if (enableAllDebugLogging)
+        {
+            Debug.Log($"[AprilTag] Calculating confidence for tag {tag.ID}:");
+        }
+        
+        // Apply corner quality assessment if enabled
+        if (enableCornerQualityAssessment)
+        {
+            // Use a simplified corner quality calculation
+            // In a real implementation, you might want to access actual corner quality data
+            float cornerQuality = Mathf.Clamp01(1.0f - (tag.Position.magnitude * 0.01f)); // Much gentler distance-based quality
+            confidence *= cornerQuality;
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag]   Corner quality: {cornerQuality:F3}, confidence after: {confidence:F3}");
+            }
+        }
+        
+        // Apply multi-frame validation confidence
+        if (enableMultiFrameValidation && _detectionHistory.TryGetValue(tag.ID, out var history))
+        {
+            float validationConfidence = CalculateValidationConfidence(history);
+            confidence *= validationConfidence;
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag]   Validation confidence: {validationConfidence:F3}, confidence after: {confidence:F3}");
+            }
+        }
+        
+        // Apply pose smoothing confidence
+        if (enablePoseSmoothing && _filteredPoses.TryGetValue(tag.ID, out var filteredPose))
+        {
+            if (filteredPose.isInitialized)
+            {
+                // Higher confidence for more stable poses - much gentler decay
+                float stabilityConfidence = Mathf.Clamp01(1.0f - (Time.time - filteredPose.lastUpdateTime) * 0.01f);
+                confidence *= stabilityConfidence;
+                
+                if (enableAllDebugLogging)
+                {
+                    Debug.Log($"[AprilTag]   Stability confidence: {stabilityConfidence:F3}, confidence after: {confidence:F3}");
+                }
+            }
+        }
+        
+        // Ensure minimum confidence to prevent 0.0f values
+        float finalConfidence = Mathf.Clamp01(confidence);
+        if (finalConfidence < 0.1f) // Minimum 10% confidence
+        {
+            finalConfidence = 0.1f;
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Confidence clamped to minimum 0.1f for tag {tag.ID} (was {confidence:F3})");
+            }
+        }
+        
+        return finalConfidence;
+    }
+    
+    /// <summary>
+    /// Calculate validation confidence based on detection history
+    /// </summary>
+    private float CalculateValidationConfidence(Queue<TagDetectionHistory> history)
+    {
+        if (history.Count < 2) return 0.5f; // Low confidence for single detections
+        
+        var recentDetections = history.Take(validationFrameCount).ToList();
+        if (recentDetections.Count < 2) return 0.5f;
+        
+        // Calculate position consistency
+        float positionVariance = 0f;
+        float rotationVariance = 0f;
+        
+        for (int i = 1; i < recentDetections.Count; i++)
+        {
+            positionVariance += Vector3.Distance(recentDetections[i].position, recentDetections[i-1].position);
+            rotationVariance += Quaternion.Angle(recentDetections[i].rotation, recentDetections[i-1].rotation);
+        }
+        
+        positionVariance /= (recentDetections.Count - 1);
+        rotationVariance /= (recentDetections.Count - 1);
+        
+        // Convert variance to confidence (lower variance = higher confidence)
+        float positionConfidence = Mathf.Clamp01(1.0f - (positionVariance / maxPositionDeviation));
+        float rotationConfidence = Mathf.Clamp01(1.0f - (rotationVariance / maxRotationDeviation));
+        
+        float finalConfidence = (positionConfidence + rotationConfidence) * 0.5f;
+        
+        if (enableAllDebugLogging)
+        {
+            Debug.Log($"[AprilTag] Validation confidence calculation:");
+            Debug.Log($"[AprilTag]   Position variance: {positionVariance:F3}m, max: {maxPositionDeviation:F3}m, confidence: {positionConfidence:F3}");
+            Debug.Log($"[AprilTag]   Rotation variance: {rotationVariance:F1}°, max: {maxRotationDeviation:F1}°, confidence: {rotationConfidence:F3}");
+            Debug.Log($"[AprilTag]   Final validation confidence: {finalConfidence:F3}");
+        }
+        
+        return finalConfidence;
+    }
+    
+    /// <summary>
+    /// Calculate world position for a tag (fallback method)
+    /// </summary>
+    private Vector3 CalculateWorldPosition(TagPose tag)
+    {
+        // Use the existing world position calculation logic
+        var camRef = GetCorrectCameraReference();
+        if (camRef != null)
+        {
+            // Convert AprilTag position to world space
+            var adjustedPosition = camRef.rotation * tag.Position;
+            return camRef.position + adjustedPosition + positionOffset;
+        }
+        
+        // Fallback to tag position if no camera reference
+        return tag.Position + positionOffset;
+    }
+    
+    /// <summary>
+    /// Calculate world rotation for a tag (fallback method)
+    /// </summary>
+    private Quaternion CalculateWorldRotation(TagPose tag)
+    {
+        // Use the existing world rotation calculation logic
+        var camRef = GetCorrectCameraReference();
+        if (camRef != null)
+        {
+            // Convert AprilTag rotation to world space
+            var adjustedRotation = camRef.rotation * tag.Rotation;
+            return adjustedRotation * Quaternion.Euler(rotationOffset);
+        }
+        
+        // Fallback to tag rotation if no camera reference
+        return tag.Rotation * Quaternion.Euler(rotationOffset);
     }
 
     private void RecreateDetectorIfNeeded(int width, int height, int dec)
@@ -497,6 +926,50 @@ public class AprilTagController : MonoBehaviour
     {
         _detector?.Dispose();
         _detector = null;
+        
+        _gpuPreprocessor?.Dispose();
+        _gpuPreprocessor = null;
+    }
+    
+    /// <summary>
+    /// Update GPU preprocessing settings at runtime
+    /// </summary>
+    public void UpdateGPUPreprocessingSettings(AprilTagGPUPreprocessor.PreprocessingSettings newSettings)
+    {
+        gpuPreprocessingSettings = newSettings;
+        
+        if (_gpuPreprocessor != null)
+        {
+            _gpuPreprocessor.UpdateSettings(newSettings);
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log("[AprilTag] GPU preprocessing settings updated");
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Toggle GPU preprocessing at runtime
+    /// </summary>
+    public void SetGPUPreprocessingEnabled(bool enabled)
+    {
+        enableGPUPreprocessing = enabled;
+        
+        if (!enabled && _gpuPreprocessor != null)
+        {
+            _gpuPreprocessor.Dispose();
+            _gpuPreprocessor = null;
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log("[AprilTag] GPU preprocessing disabled");
+            }
+        }
+        else if (enabled && enableAllDebugLogging)
+        {
+            Debug.Log("[AprilTag] GPU preprocessing enabled - will initialize on next frame");
+        }
     }
 
     private WebCamTexture GetActiveWebCamTexture()
@@ -2367,6 +2840,28 @@ public class AprilTagController : MonoBehaviour
             
             // Final fallback to 3D pose estimation
             return tagPose.Position * positionScaleFactor;
+        }
+    }
+    
+    private void SaveDebugImage(Color32[] pixels, int width, int height)
+    {
+        try
+        {
+            var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            
+            var bytes = tex.EncodeToPNG();
+            var path = System.IO.Path.Combine(Application.dataPath, "..", "AprilTag_Debug.png");
+            System.IO.File.WriteAllBytes(path, bytes);
+            
+            Debug.Log($"[AprilTag] Saved debug image to: {path}");
+            
+            Destroy(tex);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[AprilTag] Failed to save debug image: {e.Message}");
         }
     }
 }

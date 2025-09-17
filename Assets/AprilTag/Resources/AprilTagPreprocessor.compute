@@ -1,0 +1,189 @@
+// AprilTag GPU Preprocessor Compute Shader
+// Provides various image preprocessing operations for improved AprilTag detection
+
+#pragma kernel CSGrayscale
+#pragma kernel CSAdaptiveThreshold
+#pragma kernel CSGaussianBlur
+#pragma kernel CSEdgeEnhance
+#pragma kernel CSGrayscaleToRGBA
+
+// Input/Output textures
+Texture2D<float4> _SourceTex;
+RWTexture2D<float> _ResultTex;
+RWTexture2D<float4> _ResultTexRGBA;
+
+// Shared parameters
+float _Constant;
+int _BlockSize;
+int _KernelRadius;
+float _EdgeStrength;
+
+// Gaussian kernel buffer
+StructuredBuffer<float> _GaussianKernel;
+
+// Thread group size
+[numthreads(8, 8, 1)]
+void CSGrayscale(uint3 id : SV_DispatchThreadID)
+{
+    // Get texture dimensions
+    uint width, height;
+    _ResultTex.GetDimensions(width, height);
+    
+    if (id.x >= width || id.y >= height)
+        return;
+    
+    // Sample source texture with proper UV coordinates
+    float2 uv = float2(id.x + 0.5, id.y + 0.5) / float2(width, height);
+    uint2 sourceCoord = uint2(uv * float2(width, height));
+    
+    float4 color = _SourceTex[sourceCoord];
+    
+    // Convert to grayscale using standard weights
+    // These weights account for human eye sensitivity
+    float gray = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+    
+    _ResultTex[id.xy] = gray;
+}
+
+[numthreads(8, 8, 1)]
+void CSAdaptiveThreshold(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _SourceTex.GetDimensions(width, height);
+    
+    if (id.x >= width || id.y >= height)
+        return;
+    
+    // Calculate block boundaries using unsigned integers
+    uint halfBlock = (uint)_BlockSize / 2u;
+    uint x1 = max(0u, id.x - halfBlock);
+    uint x2 = min(width - 1u, id.x + halfBlock);
+    uint y1 = max(0u, id.y - halfBlock);
+    uint y2 = min(height - 1u, id.y + halfBlock);
+    
+    // Calculate local mean
+    float sum = 0;
+    uint count = 0;
+    
+    for (uint y = y1; y <= y2; y++)
+    {
+        for (uint x = x1; x <= x2; x++)
+        {
+            sum += _SourceTex[uint2(x, y)].r;
+            count++;
+        }
+    }
+    
+    float mean = sum / float(count);
+    
+    // Apply adaptive threshold
+    float pixel = _SourceTex[id.xy].r;
+    float threshold = mean - _Constant;
+    
+    // Binary output: 1.0 for white (foreground), 0.0 for black (background)
+    _ResultTex[id.xy] = pixel > threshold ? 1.0 : 0.0;
+}
+
+[numthreads(8, 8, 1)]
+void CSGaussianBlur(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _SourceTex.GetDimensions(width, height);
+    
+    if (id.x >= width || id.y >= height)
+        return;
+    
+    float sum = 0;
+    uint kernelSize = (uint)_KernelRadius * 2u + 1u;
+    
+    // Apply Gaussian kernel
+    for (int dy = -_KernelRadius; dy <= _KernelRadius; dy++)
+    {
+        for (int dx = -_KernelRadius; dx <= _KernelRadius; dx++)
+        {
+            uint2 coord = uint2(
+                clamp(int(id.x) + dx, 0, int(width - 1u)),
+                clamp(int(id.y) + dy, 0, int(height - 1u))
+            );
+            
+            uint kernelIdx = uint(dy + _KernelRadius) * kernelSize + uint(dx + _KernelRadius);
+            sum += _SourceTex[coord].r * _GaussianKernel[kernelIdx];
+        }
+    }
+    
+    _ResultTex[id.xy] = sum;
+}
+
+[numthreads(8, 8, 1)]
+void CSEdgeEnhance(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _SourceTex.GetDimensions(width, height);
+    
+    if (id.x >= width || id.y >= height)
+        return;
+    
+    // Edge enhancement can cause crashes - use with caution
+    
+    // Sobel edge detection
+    float3x3 sobelX = float3x3(
+        -1, 0, 1,
+        -2, 0, 2,
+        -1, 0, 1
+    );
+    
+    float3x3 sobelY = float3x3(
+        -1, -2, -1,
+         0,  0,  0,
+         1,  2,  1
+    );
+    
+    float gx = 0;
+    float gy = 0;
+    
+    // Apply Sobel operators
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            uint2 coord = uint2(
+                clamp(int(id.x) + dx, 0, int(width - 1u)),
+                clamp(int(id.y) + dy, 0, int(height - 1u))
+            );
+            
+            float pixel = _SourceTex[coord].r;
+            
+            gx += pixel * sobelX[dy + 1][dx + 1];
+            gy += pixel * sobelY[dy + 1][dx + 1];
+        }
+    }
+    
+    // Calculate edge magnitude
+    float edge = sqrt(gx * gx + gy * gy);
+    
+    // Combine with original image
+    float original = _SourceTex[id.xy].r;
+    float enhanced = original + edge * _EdgeStrength;
+    
+    // Clamp to valid range
+    _ResultTex[id.xy] = saturate(enhanced);
+}
+
+[numthreads(8, 8, 1)]
+void CSGrayscaleToRGBA(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _ResultTex.GetDimensions(width, height);
+    
+    if (id.x >= width || id.y >= height)
+        return;
+    
+    // Read grayscale value
+    float gray = _ResultTex[id.xy];
+    
+    // Convert to RGBA format expected by AprilTag detector
+    // AprilTag library uses the green channel, so we need to ensure all channels have the same value
+    float4 rgba = float4(gray, gray, gray, 1.0);
+    
+    _ResultTexRGBA[id.xy] = rgba;
+}
