@@ -1,1266 +1,2867 @@
-// Assets/AprilTag/AprilTagSceneSetup.cs
-// Complete setup script for AprilTag permission system and detection functionality
+// Assets/AprilTag/AprilTagController.cs
+// Quest-only AprilTag tracker using Meta Passthrough + locally integrated AprilTag library.
+// Uses reflection to read WebCamTexture so there's no compile-time dependency on WebCamTextureManager.
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using UnityEngine;
-using UnityEngine.UI;
-using AprilTag; // For tag family enum
+using AprilTag; // locally integrated AprilTag library
 using PassthroughCameraSamples;
+using Unity.XR.CoreUtils;
 using Meta.XR.Samples;
 using Meta.XR;
-using System.Linq;
 
-[System.Serializable]
-public class AprilTagSceneSetup : MonoBehaviour
+public class AprilTagController : MonoBehaviour
 {
-    [Header("Auto Setup")]
-    [SerializeField] private bool setupOnAwake = true;
-    [SerializeField] private bool createPermissionsManager = true;
-    [SerializeField] private bool createPermissionUI = true;
-    [SerializeField] private bool createAprilTagController = true;
-    [SerializeField] private bool createWebCamManager = true;
-    [SerializeField] private bool connectToWebCamManager = true;
-    [SerializeField] private bool createEnvironmentRaycastManager = true;
-    [SerializeField] private bool setupQuestSpecificFeatures = true;
+    [Header("Passthrough Feed")]
+    [Tooltip("Assign the WebCamTextureManager component from Meta's Passthrough Camera API samples.")]
+    [SerializeField] private UnityEngine.Object webCamManager;  // reflection target
+    [Tooltip("Optional: override the feed with your own WebCamTexture.")]
+    [SerializeField] private WebCamTexture webCamTextureOverride;
 
-    [Header("Permission Manager Settings")]
-    [SerializeField] private bool requestPermissionsOnStart = true;
-    [SerializeField] private bool retryOnDenial = true;
-    [SerializeField] private float retryDelaySeconds = 2f;
-
-    [Header("Permission UI Settings")]
-    [SerializeField] private bool showPanelOnStart = true;
-    [SerializeField] private bool autoHideOnGranted = true;
-    [SerializeField] private float autoHideDelay = 3f;
-
-    [Header("AprilTag Detection Settings")]
-    [SerializeField] private AprilTag.Interop.TagFamily tagFamily = AprilTag.Interop.TagFamily.Tag36h11;
-    [SerializeField] private float tagSizeMeters = 0.165f;
-    [Range(1, 8)][SerializeField] private int decimate = 2;
-    [SerializeField] private float maxDetectionsPerSecond = 72f;
-    [SerializeField] private float horizontalFovDeg = 78f;
-    [SerializeField] private bool scaleVizToTagSize = true;
-
-    [Header("Tag Visualization")]
+    [Header("Visualization")]
     [SerializeField] private GameObject tagVizPrefab;
-    [SerializeField] private bool createSimpleTagViz = true;
+    [SerializeField] private bool scaleVizToTagSize = true;
+    [Tooltip("Optional: Override the camera used for coordinate transformation. If null, will auto-detect.")]
     [SerializeField] private Camera referenceCamera;
+    [Tooltip("Offset to apply to tag positions (useful for calibration)")]
     [SerializeField] private Vector3 positionOffset = Vector3.zero;
-    [SerializeField] private Vector3 rotationOffset = Vector3.zero;
-    [SerializeField] private bool enablePositionOffset = true;
-    [SerializeField] private bool enableRotationOffset = true;
-    [SerializeField] private bool useCenterEyeTransform = true;
-    [SerializeField] private float cameraHeightOffset = 0.0f;
-    [SerializeField] private bool enableIPDCompensation = true;
-    
-    [Header("Tuned Configuration (Default Values)")]
+    [Tooltip("Additional offset for corner-based positioning to correct alignment")]
     [SerializeField] private Vector3 cornerPositionOffset = new Vector3(0.000f, 0.000f, 0.000f);
-    [SerializeField] private bool enableConfigurationTool = false;
-    [SerializeField] private bool enableAllDebugLogging = true;
+    [Tooltip("Save runtime offset to PlayerPrefs for persistence")]
+    [SerializeField] private bool saveRuntimeOffset = true;
+    [Tooltip("Rotation offset to apply to tag rotations (useful for calibration)")]
+    [SerializeField] private Vector3 rotationOffset = Vector3.zero;
+    [Tooltip("Quest-specific: Use the center eye transform for better positioning")]
+    [SerializeField] private bool useCenterEyeTransform = true;
+    [Tooltip("Quest-specific: Use proper passthrough camera raycasting for accurate positioning")]
     [SerializeField] private bool usePassthroughRaycasting = true;
-    [SerializeField] private bool ignoreOcclusion = true;
-    [SerializeField] private float positionScaleFactor = 1.0f;
-    [SerializeField] private float minDetectionDistance = 0.3f;
-    [SerializeField] private float maxDetectionDistance = 20.0f;
-    [SerializeField] private bool enableDistanceScaling = true;
-    [SerializeField] private bool enableQuestDebugging = true;
-
-    [Header("User Runtime Offset Configuration")]
-    [Tooltip("Enable user-specified runtime offset (overrides default cornerPositionOffset)")]
-    [SerializeField] private bool useUserRuntimeOffset = false;
-    [Tooltip("User-measured runtime offset values (X, Y, Z in meters)")]
-    [SerializeField] private Vector3 userRuntimeOffset = new Vector3(0.000f, 0.000f, 0.000f);
-    [Tooltip("Apply user offset immediately when setting up the controller")]
-    [SerializeField] private bool applyUserOffsetOnSetup = true;
-    [Tooltip("Save user offset to PlayerPrefs for persistence")]
-    [SerializeField] private bool saveUserOffsetToPersistence = true;
-
-    [Header("Quest Runtime Cleanup")]
-    [Tooltip("Enable automatic cleanup of duplicate permission panels on Quest")]
-    [SerializeField] private bool enableRuntimeCleanup = true;
-
-
-    [Header("WebCam Manager Settings")]
-    [SerializeField] private PassthroughCameraSamples.PassthroughCameraEye cameraEye = PassthroughCameraSamples.PassthroughCameraEye.Left;
-    [SerializeField] private Vector2Int requestedResolution = new Vector2Int(0, 0); // 0,0 = highest resolution
-
-    [Header("Quest-Specific Settings")]
-    [SerializeField] private bool enablePassthroughRaycasting = true;
-    [SerializeField] private bool autoFindEnvironmentRaycastManager = true;
+    [Tooltip("Environment raycast manager for accurate 3D positioning")]
     [SerializeField] private EnvironmentRaycastManager environmentRaycastManager;
-    [SerializeField] private bool createSimpleEnvironmentRaycastManager = true;
-    [SerializeField] private bool setupCenterEyeAnchor = true;
-    [SerializeField] private GameObject centerEyeAnchor;
+    [Tooltip("Ignore occlusion - visualizations will always be visible")]
+    [SerializeField] private bool ignoreOcclusion = true;
+    [Tooltip("Scale factor to adjust tag positioning (1.0 = normal, 0.5 = half size, 2.0 = double size)")]
+    [SerializeField] private float positionScaleFactor = 1.0f;
+    [Tooltip("Minimum detection distance in meters (for very close tags)")]
+    [SerializeField] private float minDetectionDistance = 0.3f;
+    [Tooltip("Maximum detection distance in meters (for very far tags)")]
+    [SerializeField] private float maxDetectionDistance = 20.0f;
+    [Tooltip("Enable distance-based scaling adjustments")]
+    [SerializeField] private bool enableDistanceScaling = true;
+    [Tooltip("Enable Quest debugging with controller input")]
+    [SerializeField] private bool enableQuestDebugging = true;
+    [Tooltip("Use improved camera intrinsics for better tag alignment")]
+    [SerializeField] private bool useImprovedIntrinsics = false;
+    [Tooltip("Make tags world-locked (rotation independent of headset movement) - inspired by PhotonVision's stable pose estimation")]
+    [SerializeField] private bool worldLockedRotation = true;
+    [Tooltip("Scale multiplier for tag visualization (1.0 = normal size)")]
+    [SerializeField] private float visualizationScaleMultiplier = 1.0f;
+    [Tooltip("Test mode: Use identity rotation to see if positioning is correct")]
+    [SerializeField] private bool testModeIdentityRotation = false;
+
+    [Header("Detection")]
+    [Tooltip("Tag family to detect. Tag36h11 is recommended for ArUcO compatibility.")]
+    [SerializeField] private AprilTag.Interop.TagFamily tagFamily = AprilTag.Interop.TagFamily.Tag36h11;
+    [Tooltip("Physical tag edge length (meters).")]
+    [SerializeField] private float tagSizeMeters = 0.165f;
+    [Tooltip("Downscale factor for detection (1 = full res, 2 = half, etc.).")]
+    [Range(1, 8)][SerializeField] private int decimate = 2;
+    [Tooltip("Max detection updates per second.")]
+    [SerializeField] private float maxDetectionsPerSecond = 72f;
+    [Tooltip("Horizontal FOV (degrees) of the passthrough camera.")]
+    [SerializeField] private float horizontalFovDeg = 78f;
+
+    [Header("Calibration Offsets")]
+    [Tooltip("Enable position offset")]
+    [SerializeField] private bool enablePositionOffset = true;
+    [Tooltip("Enable rotation offset")]
+    [SerializeField] private bool enableRotationOffset = true;
+
+    [Header("Diagnostics")]
+    [Tooltip("Enable all debug logging (can be toggled at runtime)")]
+    [SerializeField] private bool enableAllDebugLogging = true;
+    [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
+    [SerializeField] private bool enableConfigurationTool = false; // Disabled by default to avoid input conflicts
+    
+    [Header("GPU Preprocessing")]
+    [Tooltip("Enable GPU-accelerated image preprocessing for better detection quality")]
+    [SerializeField] private bool enableGPUPreprocessing = true; // Fixed and re-enabled
+    [Tooltip("GPU preprocessing settings")]
+    [SerializeField] private AprilTagGPUPreprocessor.PreprocessingSettings gpuPreprocessingSettings = new AprilTagGPUPreprocessor.PreprocessingSettings();
+    [Tooltip("Save preprocessed image for debugging (creates AprilTag_Debug.png in project root)")]
+    [SerializeField] private bool debugSavePreprocessedImage = false;
+    
+    [Header("PhotonVision-Inspired Filtering")]
+    [Tooltip("Enable pose smoothing filter (reduces jitter)")]
+    [SerializeField] private bool enablePoseSmoothing = true;
+    [Tooltip("Position smoothing time constant (seconds)")]
+    [SerializeField] private float positionSmoothingTime = 0.1f;
+    [Tooltip("Rotation smoothing time constant (seconds)")]
+    [SerializeField] private float rotationSmoothingTime = 0.15f;
+    [Tooltip("Enable multi-frame validation (rejects inconsistent detections)")]
+    [SerializeField] private bool enableMultiFrameValidation = true;
+    [Tooltip("Number of frames to validate against")]
+    [SerializeField] private int validationFrameCount = 3;
+    [Tooltip("Maximum position deviation for validation (meters)")]
+    [SerializeField] private float maxPositionDeviation = 0.2f; // Increased from 0.05f for Quest jitter
+    [Tooltip("Maximum rotation deviation for validation (degrees)")]
+    [SerializeField] private float maxRotationDeviation = 30f; // Increased from 15f for Quest jitter
+    [Tooltip("Enable corner quality assessment")]
+    [SerializeField] private bool enableCornerQualityAssessment = true;
+    [Tooltip("Minimum corner quality threshold (0-1)")]
+    [SerializeField] private float minCornerQuality = 0.3f;
 
     [Header("Spatial Anchors")]
-    [SerializeField] private bool createSpatialAnchorManager = true; // Default enabled
+    [Tooltip("Enable spatial anchor creation for detected tags")]
     [SerializeField] private bool enableSpatialAnchors = true;
+    [Tooltip("Spatial anchor manager component (auto-created if null)")]
+    [SerializeField] private AprilTagSpatialAnchorManager spatialAnchorManager;
+    [Tooltip("Detection confidence threshold for anchor placement (0.0 - 1.0)")]
+    [Range(0.0f, 1.0f)]
     [SerializeField] private float anchorConfidenceThreshold = 0.1f; // Lowered to allow low-confidence tags
-    [SerializeField] private int requiredStableFrames = 1; // Reduced to allow single-frame detections
-    [SerializeField] private float maxDetectionTimeout = 10f;
-    [SerializeField] private bool persistAnchors = true;
-    [SerializeField] private bool enableClearAnchorsInput = true;
-    [SerializeField] private GameObject anchorPrefab;
+
+    // CPU buffers
+    private Color32[] _rgba;
     
-    [Header("Keep Out Zone Settings")]
-    [SerializeField] private bool enableKeepOutZone = true; // Re-enabled with appropriate settings for 16.5cm tags
-    [SerializeField] private float keepOutZoneMultiplier = 0.3f; // Very small multiplier for 16.5cm tags
-    [SerializeField] private float minKeepOutRadius = 0.02f; // 2cm minimum
-    [SerializeField] private float maxKeepOutRadius = 0.1f; // 10cm maximum
+    // GPU preprocessor
+    private AprilTagGPUPreprocessor _gpuPreprocessor;
+    
+    // Headset pose tracking for continuous adjustment
+    private Quaternion _lastHeadsetRotation = Quaternion.identity;
+    private Vector3 _lastHeadsetPosition = Vector3.zero;
+    private bool _headsetPoseInitialized = false;
+
+    // Detector (recreated when size/decimate changes)
+    private TagDetector _detector;
+    private int _detW, _detH, _detDecim;
+
+    private float _nextDetectT;
+    private readonly Dictionary<int, Transform> _vizById = new();
+    private int _previousTagCount = 0;
+    
+    // PhotonVision-inspired filtering data structures
+    [System.Serializable]
+    public class TagDetectionHistory
+    {
+        public Vector3 position;
+        public Quaternion rotation;
+        public float timestamp;
+        public float cornerQuality;
+        public bool isValid;
+        
+        public TagDetectionHistory(Vector3 pos, Quaternion rot, float quality)
+        {
+            position = pos;
+            rotation = rot;
+            timestamp = Time.time;
+            cornerQuality = quality;
+            isValid = true;
+        }
+    }
+    
+    [System.Serializable]
+    public class FilteredTagPose
+    {
+        public Vector3 filteredPosition;
+        public Quaternion filteredRotation;
+        public Vector3 rawPosition;
+        public Quaternion rawRotation;
+        public float lastUpdateTime;
+        public bool isInitialized;
+        
+        public FilteredTagPose()
+        {
+            filteredPosition = Vector3.zero;
+            filteredRotation = Quaternion.identity;
+            rawPosition = Vector3.zero;
+            rawRotation = Quaternion.identity;
+            lastUpdateTime = 0f;
+            isInitialized = false;
+        }
+    }
+    
+    // Detection history for multi-frame validation (PhotonVision approach)
+    private readonly Dictionary<int, Queue<TagDetectionHistory>> _detectionHistory = new();
+    
+    // Filtered poses for smoothing (PhotonVision approach)
+    private readonly Dictionary<int, FilteredTagPose> _filteredPoses = new();
+
+    void OnDisable() => DisposeDetector();
 
     void Awake()
     {
-        // Load user offset from PlayerPrefs if enabled
-        if (useUserRuntimeOffset && saveUserOffsetToPersistence)
+        // Fix Input System issues on startup
+        InputSystemFixer.FixAllEventSystems();
+        
+        // Load saved runtime offset
+        LoadRuntimeOffset();
+        
+        // Subscribe to permission events
+        AprilTagPermissionsManager.OnAllPermissionsGranted += OnAllPermissionsGranted;
+        AprilTagPermissionsManager.OnPermissionsDenied += OnPermissionsDenied;
+        
+        
+        // Auto-find EnvironmentRaycastManager if not assigned
+        if (environmentRaycastManager == null && usePassthroughRaycasting)
         {
-            LoadUserOffsetFromPlayerPrefs();
+            environmentRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
+            if (environmentRaycastManager == null && enableAllDebugLogging)
+            {
+                Debug.LogWarning("[AprilTag] No EnvironmentRaycastManager found. Passthrough raycasting will not work properly. Please assign one or disable usePassthroughRaycasting.");
+            }
         }
         
-        if (setupOnAwake)
-        {
-            SetupCompleteAprilTagSystem();
-        }
+        // Initialize spatial anchor manager
+        InitializeSpatialAnchorManager();
     }
-
-    void Start()
+    
+    /// <summary>
+    /// Initialize the spatial anchor manager for tag-based anchor creation
+    /// </summary>
+    private void InitializeSpatialAnchorManager()
     {
-        // Run cleanup on Quest if enabled
-        if (enableRuntimeCleanup)
+        if (!enableSpatialAnchors) return;
+        
+        // Find or create spatial anchor manager if not assigned
+        if (spatialAnchorManager == null)
         {
-            CleanUpDuplicatePermissionPanels();
-        }
-    }
-
-    [ContextMenu("Setup Complete AprilTag System")]
-    public void SetupCompleteAprilTagSystem()
-    {
-
-        // Create or configure permissions manager
-        if (createPermissionsManager)
-        {
-            SetupPermissionsManager();
-        }
-
-        // Create or configure permission UI
-        if (createPermissionUI)
-        {
-            SetupPermissionUI();
-        }
-
-        // Create or configure WebCam Manager
-        if (createWebCamManager)
-        {
-            SetupWebCamManager();
-        }
-
-        // Create or configure AprilTag controller
-        if (createAprilTagController)
-        {
-            SetupAprilTagController();
-        }
-
-        // Create or configure Spatial Anchor Manager
-        if (createSpatialAnchorManager)
-        {
-            SetupSpatialAnchorManager();
-        }
-
-        // Connect to WebCam Manager if available
-        if (connectToWebCamManager)
-        {
-            ConnectToWebCamManager();
-        }
-
-        // Setup Quest-specific features
-        if (setupQuestSpecificFeatures)
-        {
-            SetupQuestSpecificFeatures();
-        }
-
-    }
-
-    [ContextMenu("Setup AprilTag Permissions Only")]
-    public void SetupAprilTagPermissions()
-    {
-
-        // Create or configure permissions manager
-        if (createPermissionsManager)
-        {
-            SetupPermissionsManager();
-        }
-
-        // Create or configure permission UI
-        if (createPermissionUI)
-        {
-            SetupPermissionUI();
-        }
-
-    }
-
-    private void SetupAprilTagController()
-    {
-        var existingController = FindFirstObjectByType<AprilTagController>();
-        if (existingController == null)
-        {
-            // Create new AprilTag controller
-            var controllerGO = new GameObject("AprilTagController");
-            var controller = controllerGO.AddComponent<AprilTagController>();
-
-            // Configure settings via reflection
-            var controllerType = typeof(AprilTagController);
+            // First try to find existing manager in the scene
+            spatialAnchorManager = FindFirstObjectByType<AprilTagSpatialAnchorManager>();
             
-            // Set detection settings
-            var tagFamilyField = controllerType.GetField("tagFamily", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var tagSizeField = controllerType.GetField("tagSizeMeters", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var decimateField = controllerType.GetField("decimate", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var maxDetectionsField = controllerType.GetField("maxDetectionsPerSecond", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var fovField = controllerType.GetField("horizontalFovDeg", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var scaleVizField = controllerType.GetField("scaleVizToTagSize", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var vizPrefabField = controllerType.GetField("tagVizPrefab", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var referenceCameraField = controllerType.GetField("referenceCamera", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var positionOffsetField = controllerType.GetField("positionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var rotationOffsetField = controllerType.GetField("rotationOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enablePositionOffsetField = controllerType.GetField("enablePositionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableRotationOffsetField = controllerType.GetField("enableRotationOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var useCenterEyeTransformField = controllerType.GetField("useCenterEyeTransform", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var cameraHeightOffsetField = controllerType.GetField("cameraHeightOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableIPDCompensationField = controllerType.GetField("enableIPDCompensation", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var usePassthroughRaycastingField = controllerType.GetField("usePassthroughRaycasting", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var environmentRaycastManagerField = controllerType.GetField("environmentRaycastManager", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var ignoreOcclusionField = controllerType.GetField("ignoreOcclusion", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var positionScaleFactorField = controllerType.GetField("positionScaleFactor", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var minDetectionDistanceField = controllerType.GetField("minDetectionDistance", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var maxDetectionDistanceField = controllerType.GetField("maxDetectionDistance", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableConfigurationToolField = controllerType.GetField("enableConfigurationTool", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableAllDebugLoggingField = controllerType.GetField("enableAllDebugLogging", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableDistanceScalingField = controllerType.GetField("enableDistanceScaling", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableQuestDebuggingField = controllerType.GetField("enableQuestDebugging", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // GPU preprocessing fields
-            var enableGPUPreprocessingField = controllerType.GetField("enableGPUPreprocessing", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var gpuPreprocessingSettingsField = controllerType.GetField("gpuPreprocessingSettings", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // PhotonVision-inspired filtering fields
-            var enablePoseSmoothingField = controllerType.GetField("enablePoseSmoothing", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableMultiFrameValidationField = controllerType.GetField("enableMultiFrameValidation", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableCornerQualityAssessmentField = controllerType.GetField("enableCornerQualityAssessment", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // Quest perspective correction fields
-            var useImprovedIntrinsicsField = controllerType.GetField("useImprovedIntrinsics", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            tagFamilyField?.SetValue(controller, tagFamily);
-            tagSizeField?.SetValue(controller, tagSizeMeters);
-            decimateField?.SetValue(controller, decimate);
-            maxDetectionsField?.SetValue(controller, maxDetectionsPerSecond);
-            fovField?.SetValue(controller, horizontalFovDeg);
-            scaleVizField?.SetValue(controller, scaleVizToTagSize);
-            referenceCameraField?.SetValue(controller, referenceCamera);
-            positionOffsetField?.SetValue(controller, positionOffset);
-            rotationOffsetField?.SetValue(controller, rotationOffset);
-            enablePositionOffsetField?.SetValue(controller, enablePositionOffset);
-            enableRotationOffsetField?.SetValue(controller, enableRotationOffset);
-            useCenterEyeTransformField?.SetValue(controller, useCenterEyeTransform);
-            cameraHeightOffsetField?.SetValue(controller, cameraHeightOffset);
-            enableIPDCompensationField?.SetValue(controller, enableIPDCompensation);
-            usePassthroughRaycastingField?.SetValue(controller, usePassthroughRaycasting);
-            environmentRaycastManagerField?.SetValue(controller, environmentRaycastManager);
-            ignoreOcclusionField?.SetValue(controller, ignoreOcclusion);
-            positionScaleFactorField?.SetValue(controller, positionScaleFactor);
-            minDetectionDistanceField?.SetValue(controller, minDetectionDistance);
-            maxDetectionDistanceField?.SetValue(controller, maxDetectionDistance);
-            enableDistanceScalingField?.SetValue(controller, enableDistanceScaling);
-            enableQuestDebuggingField?.SetValue(controller, enableQuestDebugging);
-            
-            // Apply spatial anchor settings
-            var enableSpatialAnchorsField = controllerType.GetField("enableSpatialAnchors", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var anchorConfidenceThresholdField = controllerType.GetField("anchorConfidenceThreshold", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            enableSpatialAnchorsField?.SetValue(controller, enableSpatialAnchors);
-            anchorConfidenceThresholdField?.SetValue(controller, anchorConfidenceThreshold);
-            
-            // Connect to spatial anchor manager if it exists
-            var spatialAnchorManager = FindFirstObjectByType<AprilTagSpatialAnchorManager>();
-            if (spatialAnchorManager != null)
+            // If not found, try as a component on this object
+            if (spatialAnchorManager == null)
             {
-                // Connect the spatial anchor manager to the controller
-                var spatialAnchorManagerField = controllerType.GetField("spatialAnchorManager", 
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                spatialAnchorManagerField?.SetValue(controller, spatialAnchorManager);
+                spatialAnchorManager = GetComponent<AprilTagSpatialAnchorManager>();
+            }
+            
+            // If still not found, create one as a component (fallback)
+            if (spatialAnchorManager == null)
+            {
+                spatialAnchorManager = gameObject.AddComponent<AprilTagSpatialAnchorManager>();
                 
                 if (enableAllDebugLogging)
                 {
-                    Debug.Log("[AprilTagSceneSetup] Connected AprilTag Controller to Spatial Anchor Manager");
+                    Debug.Log("[AprilTag] Created AprilTagSpatialAnchorManager as component (fallback)");
                 }
             }
-            else if (enableSpatialAnchors)
+            else
             {
-                Debug.LogWarning("[AprilTagSceneSetup] Spatial anchors enabled but no Spatial Anchor Manager found. Make sure createSpatialAnchorManager is enabled.");
-            }
-            
-            // Apply GPU preprocessing settings (start disabled for initial testing)
-            enableGPUPreprocessingField?.SetValue(controller, false); // Start with GPU preprocessing disabled until verified working
-            
-            // Create and configure GPU preprocessing settings
-            if (gpuPreprocessingSettingsField != null)
-            {
-                var settingsType = System.Type.GetType("AprilTag.AprilTagGPUPreprocessor+PreprocessingSettings, Assembly-CSharp");
-                if (settingsType != null)
+                if (enableAllDebugLogging)
                 {
-                    var settings = System.Activator.CreateInstance(settingsType);
+                    Debug.Log("[AprilTag] Found existing AprilTagSpatialAnchorManager in scene");
+                }
+            }
+        }
+        
+        // Configure the spatial anchor manager
+        if (spatialAnchorManager != null)
+        {
+            // Use reflection to set the confidence threshold
+            var managerType = typeof(AprilTagSpatialAnchorManager);
+            var confidenceField = managerType.GetField("minConfidenceThreshold", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            confidenceField?.SetValue(spatialAnchorManager, anchorConfidenceThreshold);
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Spatial anchor manager initialized with confidence threshold: {anchorConfidenceThreshold}");
+            }
+        }
+    }
+    
+    void OnDestroy()
+    {
+        // Dispose detector resources
+        DisposeDetector();
+        
+        // Unsubscribe from permission events
+        AprilTagPermissionsManager.OnAllPermissionsGranted -= OnAllPermissionsGranted;
+        AprilTagPermissionsManager.OnPermissionsDenied -= OnPermissionsDenied;
+    }
+    
+    private void OnAllPermissionsGranted()
+    {
+        if (enableAllDebugLogging) Debug.Log("[AprilTag] All required permissions granted - ready to start detection");
+        // Permissions are now available, detection will start automatically in Update()
+    }
+    
+    private void OnPermissionsDenied()
+    {
+        if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] Required permissions denied - detection will not work properly");
+        // Could show UI message to user here
+    }
+
+    void Update()
+    {
+        // Quest debugging input handling
+        if (enableQuestDebugging)
+        {
+            HandleQuestDebugInput();
+        }
+
+        // Check permissions before proceeding with detection
+        if (!AprilTagPermissionsManager.HasAllPermissions)
+        {
+            // Only log this warning occasionally to avoid spam
+            if (enableAllDebugLogging && Time.frameCount % 300 == 0) 
+            {
+                Debug.LogWarning("[AprilTag] Waiting for required permissions to be granted");
+            }
+            return;
+        }
+        
+        var wct = GetActiveWebCamTexture();
+        if (wct == null)
+        {
+            if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] No WebCamTexture available");
+            return;
+        }
+        
+        if (!wct.isPlaying)
+        {
+            if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] WebCamTexture is not playing");
+            return;
+        }
+        
+        if (wct.width <= 16 || wct.height <= 16)
+        {
+            if (enableAllDebugLogging) Debug.LogWarning($"[AprilTag] WebCamTexture dimensions too small: {wct.width}x{wct.height}");
+            return;
+        }
+
+        // Additional check: ensure WebCamTexture has been initialized for at least a few frames
+        if (Time.frameCount < 10)
+        {
+            return;
+        }
+
+        if (Time.time < _nextDetectT) return;
+        _nextDetectT = Time.time + 1f / Mathf.Max(1f, maxDetectionsPerSecond);
+        
+        // Removed verbose frame processing log - only show tag detection results
+
+        // Ensure detector matches the feed dimensions
+        if (_detector == null || _detW != wct.width || _detH != wct.height || _detDecim != decimate)
+        {
+            if (enableAllDebugLogging) Debug.Log($"[AprilTag] Recreating detector: {wct.width}x{wct.height}, decimate={decimate}");
+            RecreateDetectorIfNeeded(wct.width, wct.height, decimate);
+        }
+        
+        // Ensure GPU preprocessor matches the feed dimensions
+        if (enableGPUPreprocessing)
+        {
+            if (_gpuPreprocessor == null || _detW != wct.width || _detH != wct.height)
+            {
+                _gpuPreprocessor?.Dispose();
+                _gpuPreprocessor = new AprilTagGPUPreprocessor(wct.width, wct.height, gpuPreprocessingSettings);
+                
+                if (_gpuPreprocessor.IsInitialized)
+                {
+                    if (enableAllDebugLogging) Debug.Log($"[AprilTag] Created GPU preprocessor: {wct.width}x{wct.height}");
+                }
+                else
+                {
+                    Debug.LogError("[AprilTag] Failed to initialize GPU preprocessor - falling back to CPU processing");
+                    _gpuPreprocessor = null;
+                    enableGPUPreprocessing = false;
+                }
+            }
+        }
+
+        // Get pixels - either preprocessed or raw
+        try
+        {
+            if (enableGPUPreprocessing && _gpuPreprocessor != null && _gpuPreprocessor.IsInitialized)
+            {
+                try
+                {
+                    // Process image on GPU
+                    var processedTexture = _gpuPreprocessor.ProcessTexture(wct);
+                    if (processedTexture != null)
+                    {
+                        _rgba = _gpuPreprocessor.GetProcessedPixels();
+                        if (_rgba != null && _rgba.Length > 0)
+                        {
+                            // Validate pixel count matches expected size
+                            int expectedPixels = wct.width * wct.height;
+                            if (_rgba.Length == expectedPixels)
+                            {
+                                if (enableAllDebugLogging && Time.frameCount % 60 == 0) 
+                                {
+                                    Debug.Log($"[AprilTag] GPU preprocessing completed in {_gpuPreprocessor.LastProcessingTimeMs:F2}ms, processed {_rgba.Length} pixels");
+                                }
+                                
+                                // Debug: Save preprocessed image
+                                if (debugSavePreprocessedImage && Time.frameCount % 300 == 0) // Every 5 seconds
+                                {
+                                    SaveDebugImage(_rgba, _detW, _detH);
+                                }
+                            }
+                            else
+                            {
+                                // Pixel count mismatch - fallback to raw
+                                Debug.LogError($"[AprilTag] GPU preprocessing pixel count mismatch: expected {expectedPixels}, got {_rgba.Length}. Falling back to raw pixels.");
+                                _rgba = wct.GetPixels32();
+                            }
+                        }
+                        else
+                        {
+                            // GPU processing returned no pixels, fallback to raw
+                            _rgba = wct.GetPixels32();
+                            if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] GPU preprocessing returned no pixels, using raw pixels");
+                        }
+                    }
+                    else
+                    {
+                        // Fallback to raw pixels if GPU processing failed
+                        _rgba = wct.GetPixels32();
+                        if (enableAllDebugLogging) Debug.LogWarning("[AprilTag] GPU preprocessing texture was null, using raw pixels");
+                    }
+                }
+                catch (Exception e)
+                {
+                    // GPU processing crashed - disable it and fallback to raw
+                    Debug.LogError($"[AprilTag] GPU preprocessing crashed: {e.Message}. Disabling GPU preprocessing and using raw pixels.");
+                    enableGPUPreprocessing = false;
+                    _gpuPreprocessor?.Dispose();
+                    _gpuPreprocessor = null;
+                    _rgba = wct.GetPixels32();
+                }
+            }
+            else
+            {
+                // Get pixels directly from WebCamTexture (original path)
+                _rgba = wct.GetPixels32();
+            }
+            
+            if (_rgba == null || _rgba.Length == 0)
+            {
+                if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning("[AprilTag] No pixel data available");
+                return;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (enableAllDebugLogging && Time.frameCount % 300 == 0) Debug.LogWarning($"[AprilTag] Failed to get pixels: {ex.Message}");
+            return;
+        }
+
+        // NOTE: Correct usage – DO NOT pass _rgba to the constructor.
+        // Constructor takes (width, height, decimation).
+        // Detection call takes (pixels, fovDeg, tagSizeMeters).
+        _detector.ProcessImage(_rgba.AsSpan(), horizontalFovDeg, tagSizeMeters);
+
+        // Debug logging for detection count
+        if (Time.frameCount % 60 == 0) // Log every second regardless of enableAllDebugLogging
+        {
+            var tagCount = _detector.DetectedTags?.Count() ?? 0;
+            if (tagCount == 0)
+            {
+                Debug.Log($"[AprilTag] No tags detected. Detector: {_detW}x{_detH}, decimation={_detDecim}, tagSize={tagSizeMeters}m, FOV={horizontalFovDeg}°, GPU={enableGPUPreprocessing}");
+                
+                // Additional debug info
+                if (Time.frameCount % 300 == 0) // Every 5 seconds
+                {
+                    Debug.Log($"[AprilTag] Detection params: Family={tagFamily}, MaxDetections/sec={maxDetectionsPerSecond}");
+                    Debug.Log($"[AprilTag] WebCamTexture: {wct?.width}x{wct?.height}, isPlaying={wct?.isPlaying}");
+                    Debug.Log($"[AprilTag] Pixel buffer size: {_rgba?.Length ?? 0}");
                     
-                    // Configure optimal settings for Quest
-                    var enableAdaptiveThresholdField = settingsType.GetField("enableAdaptiveThreshold");
-                    var enableHistogramEqualizationField = settingsType.GetField("enableHistogramEqualization");
-                    var enableNoiseReductionField = settingsType.GetField("enableNoiseReduction");
-                    var enableEdgeEnhancementField = settingsType.GetField("enableEdgeEnhancement");
-                    var useHalfPrecisionField = settingsType.GetField("useHalfPrecision");
+                    // Check if we have a viz prefab
+                    if (!tagVizPrefab)
+                    {
+                        Debug.LogWarning("[AprilTag] WARNING: No tag visualization prefab assigned!");
+                    }
+                }
+            }
+            else
+            {
+                Debug.Log($"[AprilTag] SUCCESS! Detected {tagCount} tags!");
+                foreach (var tag in _detector.DetectedTags.Take(5)) // Log first 5 tags
+                {
+                    Debug.Log($"[AprilTag] - Tag ID: {tag.ID}, Position: {tag.Position}, Rotation: {tag.Rotation.eulerAngles}");
+                }
+            }
+        }
+
+        // Visualize detected tags using corner-based positioning
+        var seen = new HashSet<int>();
+        var detectedCount = 0;
+        
+        // Try to get raw detection data for corner-based positioning
+        var rawDetections = GetRawDetections();
+        
+        foreach (var t in _detector.DetectedTags)
+        {
+            detectedCount++;
+            seen.Add(t.ID);
+            
+            // Try to find corresponding raw detection data for corner coordinates
+            Vector2? cornerCenter = null;
+            if (useImprovedIntrinsics && usePassthroughRaycasting)
+            {
+                // Use improved intrinsics-based corner detection
+                var eye = GetWebCamManagerEye();
+                var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
+                cornerCenter = TryGetCornerBasedCenterWithIntrinsics(t.ID, rawDetections, intrinsics);
+            }
+            else
+            {
+                // Use standard corner detection
+                cornerCenter = TryGetCornerBasedCenter(t.ID, rawDetections);
+            }
+            
+            if (enableAllDebugLogging && cornerCenter.HasValue)
+            {
+                Debug.Log($"[AprilTag] Tag {t.ID}: Corner center found at {cornerCenter.Value}");
+            }
+            else if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Tag {t.ID}: No corner center found, using fallback positioning");
+            }
+            
+            if (enableAllDebugLogging) 
+            {
+                if (usePassthroughRaycasting)
+                {
+                    var debugWorldPos = GetWorldPositionUsingPassthroughRaycasting(t);
+                    // Debug.Log($"[AprilTag] id={t.ID} camera_pos={t.Position:F3} passthrough_world_pos={debugWorldPos:F3} camera_euler={t.Rotation.eulerAngles:F1} use_raycasting={usePassthroughRaycasting} corner_center={cornerCenter:F3}");
+                }
+                else
+                {
+                    var debugCam = GetCorrectCameraReference();
+                    var debugAdjustedPosition = (t.Position + positionOffset) * positionScaleFactor;
+                    var debugWorldPos = debugCam.position + debugCam.rotation * debugAdjustedPosition;
+                    // Debug.Log($"[AprilTag] id={t.ID} camera_pos={t.Position:F3} world_pos={debugWorldPos:F3} camera_euler={t.Rotation.eulerAngles:F1} corner_center={cornerCenter:F3}");
+                }
+            }
+
+            if (!_vizById.TryGetValue(t.ID, out var tr) || tr == null)
+            {
+                if (!tagVizPrefab)
+                {
+                    if (enableAllDebugLogging && Time.frameCount % 300 == 0)
+                    {
+                        Debug.LogWarning($"[AprilTag] No tag visualization prefab assigned! Cannot create visualization for tag {t.ID}");
+                    }
+                    continue;
+                }
+                tr = Instantiate(tagVizPrefab).transform;
+                tr.name = $"AprilTag_{t.ID}";
+                
+                // Configure visualization to ignore occlusion
+                ConfigureVisualizationForNoOcclusion(tr);
+                
+                _vizById[t.ID] = tr;
+            }
+
+            // Quest-specific positioning using corner-based approach for better accuracy
+            Vector3 worldPosition;
+            Quaternion worldRotation;
+            
+            // Try corner-based positioning first (more accurate for Quest)
+            var cornerCenterResult = TryGetCornerBasedCenter(t.ID, rawDetections);
+            if (cornerCenterResult.HasValue)
+            {
+                // Use corner-based positioning which works better with Quest's coordinate system
+                worldPosition = GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t) + cornerPositionOffset;
+                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition);
+                
+                // Apply rotation offset if enabled
+                if (enableRotationOffset)
+                {
+                    worldRotation *= Quaternion.Euler(rotationOffset);
+                }
+                
+                if (enableAllDebugLogging && detectedCount != _previousTagCount)
+                {
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Position={worldPosition}, Offset={cornerPositionOffset}");
+                }
+            }
+            else
+            {
+                if (enableAllDebugLogging && detectedCount != _previousTagCount)
+                {
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Corner-based positioning failed, falling back to direct pose");
+                }
+                
+                // Fallback to direct pose approach
+                var cam = GetCorrectCameraReference();
+                
+                // Apply position offset and scaling
+                var adjustedPosition = t.Position * positionScaleFactor;
+                if (enablePositionOffset)
+                {
+                    adjustedPosition += positionOffset;
+                }
+                
+                // Apply distance scaling if enabled
+                if (enableDistanceScaling)
+                {
+                    var distance = adjustedPosition.magnitude;
+                    var scaledDistance = ApplyDistanceScaling(distance);
+                    adjustedPosition = adjustedPosition.normalized * scaledDistance;
+                }
+                
+                // Transform from camera space to world space
+                worldPosition = cam.position + cam.rotation * adjustedPosition;
+                worldRotation = GetCornerBasedRotation(t.ID, rawDetections, worldPosition);
+                
+                // Apply rotation offset if enabled
+                if (enableRotationOffset)
+                {
+                    worldRotation *= Quaternion.Euler(rotationOffset);
+                }
+                
+                if (enableAllDebugLogging && detectedCount != _previousTagCount)
+                {
+                    var camRef = GetCorrectCameraReference();
+                    var offsetTagPosition = camRef.position + camRef.rotation * t.Position;
+                    var offsetTagRotation = camRef.rotation * t.Rotation;
                     
-                    // Enable working features, disable problematic ones
-                    enableAdaptiveThresholdField?.SetValue(settings, false); // Binary output can be too aggressive
-                    enableHistogramEqualizationField?.SetValue(settings, true); // Working feature
-                    enableNoiseReductionField?.SetValue(settings, true); // Working feature
-                    enableEdgeEnhancementField?.SetValue(settings, false); // Problematic - causes crashes
-                    useHalfPrecisionField?.SetValue(settings, true); // Better performance on Quest
-                    
-                    gpuPreprocessingSettingsField.SetValue(controller, settings);
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Using direct pose positioning at {worldPosition}, AprilTag pos: {t.Position}, adjusted pos: {adjustedPosition}");
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Direct pose - Raw: {t.Position}, {t.Rotation.eulerAngles}");
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Direct pose - Offset: {offsetTagPosition}, {offsetTagRotation.eulerAngles}");
                 }
             }
             
-            // Apply PhotonVision-inspired filtering settings (enabled by default for better accuracy)
-            enablePoseSmoothingField?.SetValue(controller, true);
-            enableMultiFrameValidationField?.SetValue(controller, true);
-            enableCornerQualityAssessmentField?.SetValue(controller, true);
+            // PhotonVision-inspired filtering and validation
+            Vector2[] corners = ExtractCornersFromRawDetection(t.ID, rawDetections);
+            float cornerQuality = CalculateCornerQuality(corners);
             
-            // Apply Quest-specific fixes for wall-mounted tag parallax
-            usePassthroughRaycastingField?.SetValue(controller, true);
-            useImprovedIntrinsicsField?.SetValue(controller, true);
-            
-            // Use center eye transform for better head angle compensation
-            useCenterEyeTransformField?.SetValue(controller, true);
-            
-            // Set tuned configuration values
-            Vector3 finalCornerOffset = useUserRuntimeOffset ? userRuntimeOffset : cornerPositionOffset;
-            cornerPositionOffsetField?.SetValue(controller, finalCornerOffset);
-            enableConfigurationToolField?.SetValue(controller, enableConfigurationTool);
-            enableAllDebugLoggingField?.SetValue(controller, enableAllDebugLogging);
-            
-            // Apply user runtime offset if enabled
-            if (useUserRuntimeOffset && applyUserOffsetOnSetup)
+            // Check corner quality threshold
+            if (cornerQuality < minCornerQuality)
             {
-                ApplyUserRuntimeOffset(controller);
+                if (enableAllDebugLogging)
+                {
+                    Debug.LogWarning($"[AprilTag] Tag {t.ID} rejected - Corner quality {cornerQuality:F3} < {minCornerQuality:F3}");
+                }
+                continue; // Skip this detection
             }
-
-            // Set up tag visualization prefab
-            GameObject vizPrefab = tagVizPrefab;
-            if (vizPrefab == null && createSimpleTagViz)
+            
+            // Multi-frame validation (PhotonVision approach)
+            if (!ValidateTagDetection(t.ID, worldPosition, worldRotation, cornerQuality))
             {
-                vizPrefab = CreateSimpleTagVisualizationPrefab();
+                continue; // Skip this detection - failed validation
             }
-            vizPrefabField?.SetValue(controller, vizPrefab);
-
-            // Position the controller appropriately
-            controllerGO.transform.position = Vector3.zero;
-
+            
+            // Apply pose smoothing filter (PhotonVision approach)
+            Vector3 finalPosition = worldPosition;
+            Quaternion finalRotation = worldRotation;
+            
+            if (enablePoseSmoothing)
+            {
+                // Initialize or get existing filtered pose
+                if (!_filteredPoses.ContainsKey(t.ID))
+                {
+                    _filteredPoses[t.ID] = new FilteredTagPose();
+                }
+                
+                var filteredPose = _filteredPoses[t.ID];
+                float deltaTime = Time.time - filteredPose.lastUpdateTime;
+                
+                // Apply PhotonVision-inspired temporal filtering
+                finalPosition = FilterTagPosition(worldPosition, filteredPose.filteredPosition, deltaTime, filteredPose.isInitialized);
+                finalRotation = FilterTagRotation(worldRotation, filteredPose.filteredRotation, deltaTime, filteredPose.isInitialized);
+                
+                // Update filtered pose data
+                filteredPose.rawPosition = worldPosition;
+                filteredPose.rawRotation = worldRotation;
+                filteredPose.filteredPosition = finalPosition;
+                filteredPose.filteredRotation = finalRotation;
+                filteredPose.lastUpdateTime = Time.time;
+                filteredPose.isInitialized = true;
+            }
+            
+            if (enableAllDebugLogging && detectedCount != _previousTagCount)
+            {
+                Debug.Log($"[AprilTag] Tag {t.ID}: Raw={worldPosition:F3}, Filtered={finalPosition:F3}, Quality={cornerQuality:F3}");
+            }
+            
+            tr.SetPositionAndRotation(finalPosition, finalRotation);
+            if (scaleVizToTagSize) tr.localScale = Vector3.one * tagSizeMeters * visualizationScaleMultiplier;
+            tr.gameObject.SetActive(true);
         }
-        else
+
+        // Log detection results only when tag count changes
+        if (detectedCount != _previousTagCount)
         {
+            if (detectedCount > 0)
+            {
+                Debug.Log($"[AprilTag] Detected {detectedCount} tags");
+            }
+            else if (_previousTagCount > 0)
+            {
+                Debug.Log($"[AprilTag] All tags lost");
+            }
         }
+        
+        // Update previous tag count for next frame
+        _previousTagCount = detectedCount;
+
+        // Process spatial anchors for detected tags
+        ProcessSpatialAnchors(seen);
+
+        // Hide those not seen this frame
+        foreach (var kv in _vizById)
+            if (!seen.Contains(kv.Key) && kv.Value) kv.Value.gameObject.SetActive(false);
     }
 
-    private void SetupSpatialAnchorManager()
+    /// <summary>
+    /// Process spatial anchors for detected tags
+    /// </summary>
+    private void ProcessSpatialAnchors(HashSet<int> seenTags)
     {
-        var existingManager = FindFirstObjectByType<AprilTagSpatialAnchorManager>();
-        if (existingManager == null)
+        if (!enableSpatialAnchors || spatialAnchorManager == null) return;
+        
+        if (enableAllDebugLogging && Time.frameCount % 60 == 0) // Log every 60 frames (1 second at 60fps)
         {
-            // Create new Spatial Anchor Manager
-            var managerGO = new GameObject("AprilTagSpatialAnchorManager");
-            var manager = managerGO.AddComponent<AprilTagSpatialAnchorManager>();
-
-            // Configure settings via reflection
-            var managerType = typeof(AprilTagSpatialAnchorManager);
+            Debug.Log($"[AprilTag] ProcessSpatialAnchors: Processing {_detector.DetectedTags.Count()} detected tags");
+            foreach (var tag in _detector.DetectedTags)
+            {
+                Debug.Log($"[AprilTag]   - Tag {tag.ID} at position {tag.Position}");
+            }
+        }
+        
+        // Process each detected tag for spatial anchor creation
+        foreach (var tag in _detector.DetectedTags)
+        {
+            // Calculate confidence based on corner quality and detection stability
+            float confidence = CalculateDetectionConfidence(tag);
             
-            // Set spatial anchor settings
-            var enableSpatialAnchorsField = managerType.GetField("enableSpatialAnchors", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var minConfidenceThresholdField = managerType.GetField("minConfidenceThreshold", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var requiredStableFramesField = managerType.GetField("requiredStableFrames", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var maxDetectionTimeoutField = managerType.GetField("maxDetectionTimeout", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var persistAnchorsField = managerType.GetField("persistAnchors", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableClearAnchorsInputField = managerType.GetField("enableClearAnchorsInput", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var anchorPrefabField = managerType.GetField("anchorPrefab", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var enableDebugLoggingField = managerType.GetField("enableDebugLogging", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // Set keep out zone settings
-            var enableKeepOutZoneField = managerType.GetField("enableKeepOutZone", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var keepOutZoneMultiplierField = managerType.GetField("keepOutZoneMultiplier", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var minKeepOutRadiusField = managerType.GetField("minKeepOutRadius", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var maxKeepOutRadiusField = managerType.GetField("maxKeepOutRadius", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            // Apply spatial anchor settings
-            enableSpatialAnchorsField?.SetValue(manager, enableSpatialAnchors);
-            minConfidenceThresholdField?.SetValue(manager, anchorConfidenceThreshold);
-            requiredStableFramesField?.SetValue(manager, requiredStableFrames);
-            maxDetectionTimeoutField?.SetValue(manager, maxDetectionTimeout);
-            persistAnchorsField?.SetValue(manager, persistAnchors);
-            enableClearAnchorsInputField?.SetValue(manager, enableClearAnchorsInput);
-            anchorPrefabField?.SetValue(manager, anchorPrefab);
-            enableDebugLoggingField?.SetValue(manager, enableAllDebugLogging);
-            
-            // Apply keep out zone settings
-            enableKeepOutZoneField?.SetValue(manager, enableKeepOutZone);
-            keepOutZoneMultiplierField?.SetValue(manager, keepOutZoneMultiplier);
-            minKeepOutRadiusField?.SetValue(manager, minKeepOutRadius);
-            maxKeepOutRadiusField?.SetValue(manager, maxKeepOutRadius);
-
-            // Position the manager appropriately
-            managerGO.transform.position = Vector3.zero;
-
+            // Debug logging for confidence values
             if (enableAllDebugLogging)
             {
-                Debug.Log($"[AprilTagSceneSetup] Created Spatial Anchor Manager with keep out zones enabled: {enableKeepOutZone}");
+                Debug.Log($"[AprilTag] Tag {tag.ID} confidence: {confidence:F3} (threshold: {anchorConfidenceThreshold:F3})");
+            }
+            
+            // Get the filtered pose for this tag
+            Vector3 worldPosition;
+            Quaternion worldRotation;
+            
+            if (_filteredPoses.TryGetValue(tag.ID, out var filteredPose) && filteredPose.isInitialized)
+            {
+                worldPosition = filteredPose.filteredPosition;
+                worldRotation = filteredPose.filteredRotation;
+            }
+            else
+            {
+                // Fallback to raw pose if no filtered pose available
+                worldPosition = CalculateWorldPosition(tag);
+                worldRotation = CalculateWorldRotation(tag);
+            }
+            
+            // Process the tag detection for spatial anchor creation
+            spatialAnchorManager.ProcessTagDetection(tag.ID, worldPosition, worldRotation, confidence, tagSizeMeters);
+        }
+        
+        // Remove tracking for tags that are no longer detected
+        var currentTagIds = new HashSet<int>(_detector.DetectedTags.Select(t => t.ID));
+        var trackedTagIds = new HashSet<int>(_filteredPoses.Keys);
+        
+        foreach (var tagId in trackedTagIds)
+        {
+            if (!currentTagIds.Contains(tagId))
+            {
+                spatialAnchorManager.RemoveTagTracking(tagId);
             }
         }
-        else
+    }
+    
+    /// <summary>
+    /// Calculate detection confidence for a tag based on various factors
+    /// </summary>
+    private float CalculateDetectionConfidence(TagPose tag)
+    {
+        float confidence = 1.0f; // Start with maximum confidence
+        
+        if (enableAllDebugLogging)
         {
+            Debug.Log($"[AprilTag] Calculating confidence for tag {tag.ID}:");
+        }
+        
+        // Apply corner quality assessment if enabled
+        if (enableCornerQualityAssessment)
+        {
+            // Use a simplified corner quality calculation
+            // In a real implementation, you might want to access actual corner quality data
+            float cornerQuality = Mathf.Clamp01(1.0f - (tag.Position.magnitude * 0.01f)); // Much gentler distance-based quality
+            confidence *= cornerQuality;
+            
             if (enableAllDebugLogging)
             {
-                Debug.Log("[AprilTagSceneSetup] Spatial Anchor Manager already exists, skipping creation");
+                Debug.Log($"[AprilTag]   Corner quality: {cornerQuality:F3}, confidence after: {confidence:F3}");
             }
         }
-    }
-
-    private GameObject CreateSimpleTagVisualizationPrefab()
-    {
-        // Create a flat red square prefab for tag visualization
-        var prefab = new GameObject("SimpleTagVizPrefab");
         
-        // Start with unit scale - will be scaled by tagSizeMeters in positioning logic
-        prefab.transform.localScale = Vector3.one;
-        
-        // Create the flat red square
-        var redSquare = CreateFlatRedSquare(prefab.transform);
-        
-        // Remove any colliders (not needed for visualization)
-        var colliders = prefab.GetComponentsInChildren<Collider>();
-        foreach (var col in colliders)
+        // Apply multi-frame validation confidence
+        if (enableMultiFrameValidation && _detectionHistory.TryGetValue(tag.ID, out var history))
         {
-            if (col != null) DestroyImmediate(col);
-        }
-
-        return prefab;
-    }
-    
-    private GameObject CreateFlatRedSquare(Transform parent)
-    {
-        // Create a flat red square for tag visualization
-        var squareGO = new GameObject("FlatRedSquare");
-        squareGO.transform.SetParent(parent);
-        squareGO.transform.localPosition = Vector3.zero;
-        squareGO.transform.localScale = Vector3.one;
-        squareGO.transform.localRotation = Quaternion.identity;
-        
-        // Create a quad mesh for the flat square
-        var quadGO = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        quadGO.transform.SetParent(squareGO.transform);
-        quadGO.transform.localPosition = Vector3.zero;
-        quadGO.transform.localScale = Vector3.one;
-        quadGO.transform.localRotation = Quaternion.identity;
-        
-        // Remove the collider
-        var collider = quadGO.GetComponent<Collider>();
-        if (collider != null)
-        {
-            DestroyImmediate(collider);
-        }
-        
-        // Create transparent red material
-        var renderer = quadGO.GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            var material = CreateTransparentRedMaterial();
-            renderer.material = material;
-        }
-        
-        return squareGO;
-    }
-    
-    private Material CreateTransparentRedMaterial()
-    {
-        // Create a transparent red material for the flat square
-        var shader = Shader.Find("Standard");
-        if (shader == null)
-        {
-            // Fallback to default shader
-            shader = Shader.Find("Legacy Shaders/Diffuse");
-        }
-        
-        if (shader == null)
-        {
-            // Final fallback
-            shader = Shader.Find("Unlit/Color");
-        }
-        
-        var material = new Material(shader);
-        
-        // Set to transparent red
-        material.color = new Color(1f, 0f, 0f, 0.5f); // Red with 50% transparency
-        
-        // Configure for transparency
-        material.SetFloat("_Mode", 3); // Transparent mode
-        material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        material.SetInt("_ZWrite", 0); // Don't write to depth buffer
-        material.DisableKeyword("_ALPHATEST_ON");
-        material.EnableKeyword("_ALPHABLEND_ON");
-        material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-        material.renderQueue = 3000; // Transparent render queue
-        
-        // Configure to ignore occlusion
-        material.SetInt("_ZTest", 0); // Always pass depth test
-        
-        return material;
-    }
-    
-    private Material CreateWireframeMaterial(Color color)
-    {
-        // Create a simple unlit material for wireframe
-        var shader = Shader.Find("Unlit/Color");
-        if (shader == null)
-        {
-            // Fallback to default shader if Unlit/Color is not found
-            shader = Shader.Find("Legacy Shaders/Diffuse");
-        }
-        
-        if (shader == null)
-        {
-            // Final fallback to default material
-            var material = new Material(Shader.Find("Standard"));
-            material.color = color;
-            material.SetFloat("_Metallic", 0f);
-            material.SetFloat("_Smoothness", 0f);
-            return material;
-        }
-        
-        var wireframeMaterial = new Material(shader);
-        wireframeMaterial.color = color;
-        
-        // Configure to ignore occlusion
-        wireframeMaterial.renderQueue = 2000; // High but valid render queue
-        wireframeMaterial.SetInt("_ZWrite", 0); // Don't write to depth buffer
-        wireframeMaterial.SetInt("_ZTest", 0); // Always pass depth test
-        
-        return wireframeMaterial;
-    }
-
-    private void SetupWebCamManager()
-    {
-        var existingWebCamManager = FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
-        if (existingWebCamManager == null)
-        {
-            // Create new WebCam Manager
-            var webCamManagerGO = new GameObject("WebCamTextureManager");
-            var webCamManager = webCamManagerGO.AddComponent<PassthroughCameraSamples.WebCamTextureManager>();
-
-            // Configure settings via reflection
-            var managerType = typeof(PassthroughCameraSamples.WebCamTextureManager);
+            float validationConfidence = CalculateValidationConfidence(history);
+            confidence *= validationConfidence;
             
-            // Set camera eye
-            var eyeField = managerType.GetField("Eye", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            eyeField?.SetValue(webCamManager, cameraEye);
-
-            // Set requested resolution
-            var resolutionField = managerType.GetField("RequestedResolution", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            resolutionField?.SetValue(webCamManager, requestedResolution);
-
-            // Set up camera permissions reference
-            var permissionsField = managerType.GetField("CameraPermissions", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            // Try to find existing permissions manager or create a reference
-            var permissionsManager = FindFirstObjectByType<AprilTagPermissionsManager>();
-            if (permissionsManager != null)
+            if (enableAllDebugLogging)
             {
-                // Create a simple permissions component for the WebCam Manager
-                var simplePermissions = webCamManagerGO.AddComponent<PassthroughCameraSamples.PassthroughCameraPermissions>();
-                permissionsField?.SetValue(webCamManager, simplePermissions);
+                Debug.Log($"[AprilTag]   Validation confidence: {validationConfidence:F3}, confidence after: {confidence:F3}");
             }
-
-            // Position the manager appropriately
-            webCamManagerGO.transform.position = Vector3.zero;
-
         }
-        else
+        
+        // Apply pose smoothing confidence
+        if (enablePoseSmoothing && _filteredPoses.TryGetValue(tag.ID, out var filteredPose))
         {
+            if (filteredPose.isInitialized)
+            {
+                // Higher confidence for more stable poses - much gentler decay
+                float stabilityConfidence = Mathf.Clamp01(1.0f - (Time.time - filteredPose.lastUpdateTime) * 0.01f);
+                confidence *= stabilityConfidence;
+                
+                if (enableAllDebugLogging)
+                {
+                    Debug.Log($"[AprilTag]   Stability confidence: {stabilityConfidence:F3}, confidence after: {confidence:F3}");
+                }
+            }
+        }
+        
+        // Ensure minimum confidence to prevent 0.0f values
+        float finalConfidence = Mathf.Clamp01(confidence);
+        if (finalConfidence < 0.1f) // Minimum 10% confidence
+        {
+            finalConfidence = 0.1f;
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Confidence clamped to minimum 0.1f for tag {tag.ID} (was {confidence:F3})");
+            }
+        }
+        
+        return finalConfidence;
+    }
+    
+    /// <summary>
+    /// Calculate validation confidence based on detection history
+    /// </summary>
+    private float CalculateValidationConfidence(Queue<TagDetectionHistory> history)
+    {
+        if (history.Count < 2) return 0.5f; // Low confidence for single detections
+        
+        var recentDetections = history.Take(validationFrameCount).ToList();
+        if (recentDetections.Count < 2) return 0.5f;
+        
+        // Calculate position consistency
+        float positionVariance = 0f;
+        float rotationVariance = 0f;
+        
+        for (int i = 1; i < recentDetections.Count; i++)
+        {
+            positionVariance += Vector3.Distance(recentDetections[i].position, recentDetections[i-1].position);
+            rotationVariance += Quaternion.Angle(recentDetections[i].rotation, recentDetections[i-1].rotation);
+        }
+        
+        positionVariance /= (recentDetections.Count - 1);
+        rotationVariance /= (recentDetections.Count - 1);
+        
+        // Convert variance to confidence (lower variance = higher confidence)
+        float positionConfidence = Mathf.Clamp01(1.0f - (positionVariance / maxPositionDeviation));
+        float rotationConfidence = Mathf.Clamp01(1.0f - (rotationVariance / maxRotationDeviation));
+        
+        float finalConfidence = (positionConfidence + rotationConfidence) * 0.5f;
+        
+        if (enableAllDebugLogging)
+        {
+            Debug.Log($"[AprilTag] Validation confidence calculation:");
+            Debug.Log($"[AprilTag]   Position variance: {positionVariance:F3}m, max: {maxPositionDeviation:F3}m, confidence: {positionConfidence:F3}");
+            Debug.Log($"[AprilTag]   Rotation variance: {rotationVariance:F1}°, max: {maxRotationDeviation:F1}°, confidence: {rotationConfidence:F3}");
+            Debug.Log($"[AprilTag]   Final validation confidence: {finalConfidence:F3}");
+        }
+        
+        return finalConfidence;
+    }
+    
+    /// <summary>
+    /// Calculate world position for a tag (fallback method)
+    /// </summary>
+    private Vector3 CalculateWorldPosition(TagPose tag)
+    {
+        // Use the existing world position calculation logic
+        var camRef = GetCorrectCameraReference();
+        if (camRef != null)
+        {
+            // Convert AprilTag position to world space
+            var adjustedPosition = camRef.rotation * tag.Position;
+            return camRef.position + adjustedPosition + positionOffset;
+        }
+        
+        // Fallback to tag position if no camera reference
+        return tag.Position + positionOffset;
+    }
+    
+    /// <summary>
+    /// Calculate world rotation for a tag (fallback method)
+    /// </summary>
+    private Quaternion CalculateWorldRotation(TagPose tag)
+    {
+        // Use the existing world rotation calculation logic
+        var camRef = GetCorrectCameraReference();
+        if (camRef != null)
+        {
+            // Convert AprilTag rotation to world space
+            var adjustedRotation = camRef.rotation * tag.Rotation;
+            return adjustedRotation * Quaternion.Euler(rotationOffset);
+        }
+        
+        // Fallback to tag rotation if no camera reference
+        return tag.Rotation * Quaternion.Euler(rotationOffset);
+    }
+
+    private void RecreateDetectorIfNeeded(int width, int height, int dec)
+    {
+        DisposeDetector();
+        _detector = new TagDetector(width, height, tagFamily, Mathf.Max(1, dec)); // <� width, height, decimation
+        _detW = width; _detH = height; _detDecim = Mathf.Max(1, dec);
+        
+        if (enableAllDebugLogging) Debug.Log($"[AprilTag] Created detector: {width}x{height}, family={tagFamily}, decimate={Mathf.Max(1, dec)}");
+    }
+
+    private void DisposeDetector()
+    {
+        _detector?.Dispose();
+        _detector = null;
+        
+        _gpuPreprocessor?.Dispose();
+        _gpuPreprocessor = null;
+    }
+    
+    /// <summary>
+    /// Update GPU preprocessing settings at runtime
+    /// </summary>
+    public void UpdateGPUPreprocessingSettings(AprilTagGPUPreprocessor.PreprocessingSettings newSettings)
+    {
+        gpuPreprocessingSettings = newSettings;
+        
+        if (_gpuPreprocessor != null)
+        {
+            _gpuPreprocessor.UpdateSettings(newSettings);
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log("[AprilTag] GPU preprocessing settings updated");
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Toggle GPU preprocessing at runtime
+    /// </summary>
+    public void SetGPUPreprocessingEnabled(bool enabled)
+    {
+        enableGPUPreprocessing = enabled;
+        
+        if (!enabled && _gpuPreprocessor != null)
+        {
+            _gpuPreprocessor.Dispose();
+            _gpuPreprocessor = null;
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log("[AprilTag] GPU preprocessing disabled");
+            }
+        }
+        else if (enabled && enableAllDebugLogging)
+        {
+            Debug.Log("[AprilTag] GPU preprocessing enabled - will initialize on next frame");
         }
     }
 
-    private void ConnectToWebCamManager()
+    private WebCamTexture GetActiveWebCamTexture()
     {
-        // Find WebCamTextureManager in the scene
+        if (webCamTextureOverride) 
+        {
+            return webCamTextureOverride;
+        }
+        
+        // First try to get WebCamTexture from assigned webCamManager
+        if (webCamManager) 
+        {
+            // Try to read WebCamTextureManager.WebCamTexture (Meta sample) via reflection
+            var t = webCamManager.GetType();
+            var prop = t.GetProperty("WebCamTexture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (prop != null && typeof(WebCamTexture).IsAssignableFrom(prop.PropertyType))
+            {
+                var wct = prop.GetValue(webCamManager) as WebCamTexture;
+                if (wct != null) return wct;
+            }
+
+            // Fallbacks (if your provider exposes Texture/SourceTexture)
+            var texProp = t.GetProperty("Texture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                       ?? t.GetProperty("SourceTexture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var fallbackWct = texProp?.GetValue(webCamManager) as WebCamTexture;
+            if (fallbackWct != null) return fallbackWct;
+        }
+
+        // If no assigned manager or it didn't work, try to find WebCamTextureManager in the scene
         var webCamTextureManager = FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
-        if (webCamTextureManager == null)
+        if (webCamTextureManager != null)
         {
-            Debug.LogWarning("[AprilTagSceneSetup] No WebCamTextureManager found in scene. AprilTag detection may not work without passthrough camera feed.");
-            return;
+            var wct = webCamTextureManager.WebCamTexture;
+            return wct;
         }
-
-        // Find AprilTagController in the scene
-        var aprilTagController = FindFirstObjectByType<AprilTagController>();
-        if (aprilTagController == null)
-        {
-            Debug.LogWarning("[AprilTagSceneSetup] No AprilTagController found in scene. Cannot connect to WebCamTextureManager.");
-            return;
-        }
-
-        // Connect the AprilTagController to the WebCamTextureManager
-        var controllerType = typeof(AprilTagController);
-        var webCamManagerField = controllerType.GetField("webCamManager", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
-        if (webCamManagerField != null)
-        {
-            webCamManagerField.SetValue(aprilTagController, webCamTextureManager);
-        }
-        else
-        {
-            Debug.LogError("[AprilTagSceneSetup] Could not access webCamManager field in AprilTagController");
-        }
+        return null;
     }
 
-    private void SetupPermissionsManager()
+    private Transform GetCorrectCameraReference()
     {
-        var existingManager = FindFirstObjectByType<AprilTagPermissionsManager>();
-        if (existingManager == null)
+        // If a specific reference camera is assigned, use it
+        if (referenceCamera != null)
         {
-            // Create new permissions manager
-            var managerGO = new GameObject("AprilTagPermissionsManager");
-            var manager = managerGO.AddComponent<AprilTagPermissionsManager>();
-            
-            // Configure settings via reflection (since fields are private)
-            var managerType = typeof(AprilTagPermissionsManager);
-            var requestOnStartField = managerType.GetField("requestPermissionsOnStart", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var retryOnDenialField = managerType.GetField("retryOnDenial", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var retryDelayField = managerType.GetField("retryDelaySeconds", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            requestOnStartField?.SetValue(manager, requestPermissionsOnStart);
-            retryOnDenialField?.SetValue(manager, retryOnDenial);
-            retryDelayField?.SetValue(manager, retryDelaySeconds);
-
-        }
-        else
-        {
-        }
-    }
-
-    private void SetupPermissionUI()
-    {
-        // Check for existing permission UI component
-        var existingUI = FindFirstObjectByType<AprilTagPermissionUI>();
-        if (existingUI != null)
-        {
-            Debug.Log("[AprilTagSceneSetup] AprilTagPermissionUI already exists, skipping creation");
-            return;
+            return referenceCamera.transform;
         }
 
-        // Check for existing permission panel GameObject (even without component)
-        var existingPanel = GameObject.Find("AprilTagPermissionPanel");
-        if (existingPanel != null)
+        // Quest-specific: Try to use the center eye transform for better positioning
+        if (useCenterEyeTransform)
         {
-            Debug.LogWarning("[AprilTagSceneSetup] Found existing AprilTagPermissionPanel GameObject without AprilTagPermissionUI component. Adding component to existing panel.");
-            
-            // Add the component to the existing panel
-            var existingPermissionUI = existingPanel.GetComponent<AprilTagPermissionUI>();
-            if (existingPermissionUI == null)
+            // Look for OVRCameraRig or similar VR camera rig
+            var cameraRig = FindFirstObjectByType<OVRCameraRig>();
+            if (cameraRig != null)
             {
-                existingPermissionUI = existingPanel.AddComponent<AprilTagPermissionUI>();
+                // Use the center eye anchor for better positioning
+                var centerEyeAnchor = cameraRig.centerEyeAnchor;
+                if (centerEyeAnchor != null)
+                {
+                    if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using OVRCameraRig center eye anchor for Quest positioning");
+                    return centerEyeAnchor;
+                }
+            }
+
+            // Alternative: Look for XR Origin or similar
+            var xrOrigin = FindFirstObjectByType<Unity.XR.CoreUtils.XROrigin>();
+            if (xrOrigin != null && xrOrigin.Camera != null)
+            {
+                if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using XR Origin camera for Quest positioning");
+                return xrOrigin.Camera.transform;
+            }
+        }
+
+        // Try to find the correct camera for VR/AR applications
+        // First, try to find cameras with specific tags or names that might indicate passthrough/AR cameras
+        var cameras = FindObjectsByType<Camera>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        
+        // Look for cameras that might be the passthrough camera
+        foreach (var cam in cameras)
+        {
+            // Check if this camera has a name that suggests it's the passthrough camera
+            if (cam.name.ToLower().Contains("passthrough") || 
+                cam.name.ToLower().Contains("ar") || 
+                cam.name.ToLower().Contains("xr") ||
+                cam.name.ToLower().Contains("center") ||
+                cam.name.ToLower().Contains("main"))
+            {
+                if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using camera '{cam.name}' as reference for tag positioning");
+                return cam.transform;
+            }
+        }
+
+        // If no specific camera found, try to get the camera from the WebCam manager
+        if (webCamManager != null)
+        {
+            var managerType = webCamManager.GetType();
+            var cameraField = managerType.GetField("Camera", 
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            if (cameraField != null)
+            {
+                var cam = cameraField.GetValue(webCamManager) as Camera;
+                if (cam != null)
+                {
+                    if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using WebCam manager camera '{cam.name}' as reference for tag positioning");
+                    return cam.transform;
+                }
+            }
+        }
+
+        // Fallback to Camera.main or this transform
+        var fallbackCam = Camera.main ? Camera.main.transform : transform;
+        if (enableAllDebugLogging) Debug.Log($"[AprilTag] Using fallback camera '{fallbackCam.name}' as reference for tag positioning");
+        return fallbackCam;
+    }
+
+    [ContextMenu("Reset Position Offsets")]
+    public void ResetPositionOffsets()
+    {
+        positionOffset = Vector3.zero;
+        rotationOffset = Vector3.zero;
+        Debug.Log("[AprilTag] Position and rotation offsets reset to zero");
+    }
+
+    [ContextMenu("Log Current Camera Info")]
+    public void LogCurrentCameraInfo()
+    {
+        var cam = GetCorrectCameraReference();
+        Debug.Log($"[AprilTag] Current reference camera: {cam.name}");
+        Debug.Log($"[AprilTag] Camera position: {cam.position}");
+        Debug.Log($"[AprilTag] Camera rotation: {cam.rotation.eulerAngles}");
+        Debug.Log($"[AprilTag] Position offset: {positionOffset}");
+        Debug.Log($"[AprilTag] Rotation offset: {rotationOffset}");
+        Debug.Log($"[AprilTag] Use center eye transform: {useCenterEyeTransform}");
+        
+        // Log Quest-specific information
+        if (webCamManager != null)
+        {
+            var managerType = webCamManager.GetType();
+            var eyeField = managerType.GetField("Eye", 
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            if (eyeField != null)
+            {
+                var eye = eyeField.GetValue(webCamManager);
+                Debug.Log($"[AprilTag] WebCam manager eye: {eye}");
+            }
+        }
+    }
+
+    private PassthroughCameraEye GetWebCamManagerEye()
+    {
+        if (webCamManager != null)
+        {
+            var managerType = webCamManager.GetType();
+            var eyeField = managerType.GetField("Eye", 
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            if (eyeField != null)
+            {
+                return (PassthroughCameraEye)eyeField.GetValue(webCamManager);
+            }
+        }
+        return PassthroughCameraEye.Left; // Default to left eye
+    }
+
+
+    private Vector3? GetWorldPositionUsingPassthroughRaycasting(TagPose tagPose)
+    {
+        try
+        {
+            // Get the camera eye from the WebCam manager
+            var eye = GetWebCamManagerEye();
+            
+            // Get camera intrinsics for proper coordinate conversion
+            var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
+            var camRes = intrinsics.Resolution;
+            
+            // Try to use corner coordinates if available (more accurate)
+            Vector2Int screenPoint;
+            if (TryGetTagCenterFromCorners(tagPose, intrinsics, out screenPoint))
+            {
+                // Use corner-based center point
+                Debug.Log($"[AprilTag] Using corner-based center point: {screenPoint}");
+            }
+            else
+            {
+                // Fallback: Convert the 3D tag position to 2D screen coordinates
+                // The tag position is in camera space, so we need to project it to screen space
+                var scaledPosition = tagPose.Position * positionScaleFactor;
+                screenPoint = Project3DToScreen(scaledPosition, intrinsics);
             }
             
-            // Configure the existing panel
-            ConfigurePermissionUI(existingPermissionUI);
-            return;
+            // Convert 2D screen coordinates to 3D ray using passthrough camera utils
+            var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(eye, screenPoint);
+            
+            // Use environment raycasting to find the actual 3D world position
+            if (environmentRaycastManager != null && environmentRaycastManager.Raycast(ray, out var hitInfo))
+            {
+                return hitInfo.point;
+            }
+            else
+            {
+                // Fallback: project the ray forward to a reasonable distance
+                // Use the actual tag distance with proper bounds checking
+                var rawDistance = tagPose.Position.magnitude;
+                var clampedDistance = Mathf.Clamp(rawDistance, minDetectionDistance, maxDetectionDistance);
+                
+                // Apply distance-based scaling if enabled
+                if (enableDistanceScaling)
+                {
+                    clampedDistance = ApplyDistanceScaling(clampedDistance);
+                }
+                
+                return ray.origin + ray.direction * clampedDistance;
+            }
         }
-
-        // Create a simple UI canvas if none exists
-        var canvas = FindFirstObjectByType<Canvas>();
-        if (canvas == null)
+        catch (System.Exception ex)
         {
-            var canvasGO = new GameObject("Canvas");
-            canvas = canvasGO.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.WorldSpace;
-            canvasGO.AddComponent<CanvasScaler>();
-            canvasGO.AddComponent<GraphicRaycaster>();
-            
+            if (enableAllDebugLogging) Debug.LogWarning($"[AprilTag] Passthrough raycasting failed: {ex.Message}");
+            return null;
         }
-
-        // Create permission UI panel
-        var panelGO = new GameObject("AprilTagPermissionPanel");
-        panelGO.transform.SetParent(canvas.transform, false);
-            
-        // Add UI components
-        var image = panelGO.AddComponent<UnityEngine.UI.Image>();
-        image.color = new Color(0, 0, 0, 0.8f);
-        
-        var rectTransform = panelGO.GetComponent<RectTransform>();
-        rectTransform.sizeDelta = new Vector2(400, 300);
-        rectTransform.anchoredPosition = Vector2.zero;
-
-        // Add permission UI component
-        var permissionUI = panelGO.AddComponent<AprilTagPermissionUI>();
-        
-        // Configure the new panel
-        ConfigurePermissionUI(permissionUI);
-
-        // Initially hide the panel (it will show automatically if permissions are needed)
-        panelGO.SetActive(false);
     }
 
-    private void ConfigurePermissionUI(AprilTagPermissionUI permissionUI)
+    private bool TryGetTagCenterFromCorners(TagPose tagPose, PassthroughCameraIntrinsics intrinsics, out Vector2Int centerPoint)
     {
-        if (permissionUI == null) return;
+        centerPoint = Vector2Int.zero;
+        
+        try
+        {
+            // Try to access corner properties on the TagPose object
+            var tagPoseType = tagPose.GetType();
+            
+            // Try different possible corner property names
+            var cornerPropertyNames = new[] { "Corners", "CornerPoints", "Points", "Vertices", "CornerCoordinates" };
+            
+            foreach (var propName in cornerPropertyNames)
+            {
+                var cornersProperty = tagPoseType.GetProperty(propName);
+                if (cornersProperty != null)
+                {
+                    var corners = cornersProperty.GetValue(tagPose);
+                    if (corners != null)
+                    {
+                        // Try to convert to Vector2 array or similar
+                        if (corners is Vector2[] vector2Corners && vector2Corners.Length >= 4)
+                        {
+                            // Calculate center point from corners
+                            var center = Vector2.zero;
+                            foreach (var corner in vector2Corners)
+                            {
+                                center += corner;
+                            }
+                            center /= vector2Corners.Length;
+                            
+                            // Convert to screen coordinates
+                            centerPoint = new Vector2Int(
+                                Mathf.RoundToInt(center.x),
+                                Mathf.RoundToInt(center.y)
+                            );
+                            
+                            Debug.Log($"[AprilTag] Found {propName} with {vector2Corners.Length} corners, center: {centerPoint}");
+                            return true;
+                        }
+                        else if (corners is Vector2Int[] vector2IntCorners && vector2IntCorners.Length >= 4)
+                        {
+                            // Calculate center point from corners
+                            var center = Vector2.zero;
+                            foreach (var corner in vector2IntCorners)
+                            {
+                                center += new Vector2(corner.x, corner.y);
+                            }
+                            center /= vector2IntCorners.Length;
+                            
+                            centerPoint = new Vector2Int(
+                                Mathf.RoundToInt(center.x),
+                                Mathf.RoundToInt(center.y)
+                            );
+                            
+                            Debug.Log($"[AprilTag] Found {propName} with {vector2IntCorners.Length} corners, center: {centerPoint}");
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"[AprilTag] Error accessing corner coordinates: {ex.Message}");
+        }
+        
+        return false;
+    }
 
-        // Configure settings via reflection
-        var uiType = typeof(AprilTagPermissionUI);
-        var showPanelField = uiType.GetField("showPanelOnStart", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var autoHideField = uiType.GetField("autoHideOnGranted", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var hideDelayField = uiType.GetField("autoHideDelay", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    private Vector2Int Project3DToScreen(Vector3 worldPos, PassthroughCameraIntrinsics intrinsics)
+    {
+        // Convert 3D world position to 2D screen coordinates using camera intrinsics
+        // This method projects the 3D tag position to 2D screen coordinates with proper distortion handling
+        
+        var fx = intrinsics.FocalLength.x;
+        var fy = intrinsics.FocalLength.y;
+        var cx = intrinsics.PrincipalPoint.x;
+        var cy = intrinsics.PrincipalPoint.y;
+        var skew = intrinsics.Skew;
+        
+        // Ensure we have a valid depth (z should be positive and within detection range)
+        var z = Mathf.Clamp(Mathf.Abs(worldPos.z), minDetectionDistance, maxDetectionDistance);
+        
+        // Basic perspective projection
+        var x = worldPos.x / z;
+        var y = worldPos.y / z;
+        
+        // Apply camera intrinsics with skew correction
+        var u = fx * x + skew * y + cx;
+        var v = fy * y + cy;
+        
+        // Clamp to valid screen coordinates
+        var screenX = Mathf.Clamp(Mathf.RoundToInt(u), 0, intrinsics.Resolution.x - 1);
+        var screenY = Mathf.Clamp(Mathf.RoundToInt(v), 0, intrinsics.Resolution.y - 1);
+        
+        return new Vector2Int(screenX, screenY);
+    }
 
-        showPanelField?.SetValue(permissionUI, showPanelOnStart);
-        autoHideField?.SetValue(permissionUI, autoHideOnGranted);
-        hideDelayField?.SetValue(permissionUI, autoHideDelay);
+    private float ApplyDistanceScaling(float distance)
+    {
+        // Apply non-linear scaling to improve accuracy across the wide distance range
+        // This helps with both very close (0.5m) and very far (18m) tags
+        
+        if (distance <= 1.0f)
+        {
+            // For close tags (0.5m - 1m), use slight compression to prevent overshooting
+            return distance * 0.9f;
+        }
+        else if (distance <= 5.0f)
+        {
+            // For medium distance tags (1m - 5m), use linear scaling
+            return distance;
+        }
+        else if (distance <= 10.0f)
+        {
+            // For far tags (5m - 10m), use slight expansion
+            return distance * 1.1f;
+        }
+        else
+        {
+            // For very far tags (10m - 18m), use more expansion
+            return distance * 1.2f;
+        }
     }
 
 
 
 
-
-
-
-    [ContextMenu("Setup Quest-Specific Features")]
-    public void SetupQuestSpecificFeatures()
+    private void ConfigureVisualizationForNoOcclusion(Transform visualization)
     {
-        // Setup Center Eye Anchor
-        if (setupCenterEyeAnchor)
+        if (!ignoreOcclusion) return;
+
+        // Configure all renderers to ignore occlusion
+        var renderers = visualization.GetComponentsInChildren<Renderer>();
+        foreach (var renderer in renderers)
         {
-            SetupCenterEyeAnchor();
+            // Set render queue to be on top of everything else
+            var materials = renderer.materials;
+            foreach (var material in materials)
+            {
+                if (material != null)
+                {
+                    // Use a high but valid render queue value to render on top
+                    material.renderQueue = 2000; // High but within valid range
+                    
+                    // Make sure the material doesn't write to depth buffer for occlusion
+                    material.SetInt("_ZWrite", 0);
+                    material.SetInt("_ZTest", 0); // Always pass depth test
+                }
+            }
         }
 
-        // Setup Environment Raycast Manager
-        if (createEnvironmentRaycastManager)
+        // Configure Canvas components to render on top
+        var canvases = visualization.GetComponentsInChildren<Canvas>();
+        foreach (var canvas in canvases)
         {
-            SetupEnvironmentRaycastManager();
+            canvas.overrideSorting = true;
+            canvas.sortingOrder = 1000; // High sorting order
         }
 
-        // Auto-find Environment Raycast Manager if needed
-        if (autoFindEnvironmentRaycastManager && environmentRaycastManager == null)
+        // Configure UI elements to ignore raycast
+        var graphicRaycasters = visualization.GetComponentsInChildren<UnityEngine.UI.GraphicRaycaster>();
+        foreach (var raycaster in graphicRaycasters)
+        {
+            raycaster.ignoreReversedGraphics = true;
+        }
+    }
+
+    [ContextMenu("Setup Environment Raycast Manager")]
+    public void SetupEnvironmentRaycastManager()
+    {
+        if (environmentRaycastManager == null)
         {
             environmentRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
             if (environmentRaycastManager != null)
             {
-            }
-        }
-
-        // Update AprilTag Controller with Quest settings
-        UpdateAprilTagControllerWithQuestSettings();
-
-    }
-    
-    private void SetupCenterEyeAnchor()
-    {
-        // Try to find existing CenterEyeAnchor
-        if (centerEyeAnchor == null)
-        {
-            // Look for XROrigin first
-            var xrOrigin = FindFirstObjectByType<Unity.XR.CoreUtils.XROrigin>();
-            if (xrOrigin != null && xrOrigin.Camera != null)
-            {
-                // Found XROrigin with camera - this is our center eye
-                centerEyeAnchor = xrOrigin.Camera.gameObject;
-                Debug.Log($"[AprilTagSceneSetup] Found CenterEyeAnchor from XROrigin: {centerEyeAnchor.name}");
+                Debug.Log($"[AprilTag] Found and assigned EnvironmentRaycastManager: {environmentRaycastManager.name}");
             }
             else
             {
-                // Look for OVRCameraRig (older Oculus Integration)
-                var ovrCameraRig = GameObject.Find("OVRCameraRig");
-                if (ovrCameraRig != null)
+                Debug.LogWarning("[AprilTag] No EnvironmentRaycastManager found in scene. Please add one from the MultiObjectDetection sample or disable usePassthroughRaycasting.");
+            }
+        }
+        else
+        {
+            Debug.Log($"[AprilTag] EnvironmentRaycastManager already assigned: {environmentRaycastManager.name}");
+        }
+    }
+
+    [ContextMenu("Calibrate Position Scale")]
+    public void CalibratePositionScale()
+    {
+        Debug.Log("[AprilTag] Position Scale Calibration Helper");
+        Debug.Log($"Current position scale factor: {positionScaleFactor}");
+        Debug.Log("Try these values to fix scaling issues:");
+        Debug.Log("  - If tags appear too far apart: Try 0.5 or 0.25");
+        Debug.Log("  - If tags appear too close together: Try 2.0 or 4.0");
+        Debug.Log("  - If tags appear at wrong distance: Try 0.1 to 10.0");
+        Debug.Log("Adjust the 'Position Scale Factor' in the inspector and test with your tags.");
+    }
+
+    [ContextMenu("Set Scale Factor 0.5")]
+    public void SetScaleFactorHalf()
+    {
+        positionScaleFactor = 0.5f;
+        Debug.Log("[AprilTag] Position scale factor set to 0.5 (half size)");
+    }
+
+    [ContextMenu("Set Scale Factor 2.0")]
+    public void SetScaleFactorDouble()
+    {
+        positionScaleFactor = 2.0f;
+        Debug.Log("[AprilTag] Position scale factor set to 2.0 (double size)");
+    }
+
+    [ContextMenu("Reset Scale Factor")]
+    public void ResetScaleFactor()
+    {
+        positionScaleFactor = 1.0f;
+        Debug.Log("[AprilTag] Position scale factor reset to 1.0 (normal size)");
+    }
+
+    [ContextMenu("Set Range 0.5-18m")]
+    public void SetWideRange()
+    {
+        minDetectionDistance = 0.5f;
+        maxDetectionDistance = 18.0f;
+        enableDistanceScaling = true;
+        Debug.Log("[AprilTag] Detection range set to 0.5m - 18m with distance scaling enabled");
+    }
+
+    [ContextMenu("Set Range 1-10m")]
+    public void SetMediumRange()
+    {
+        minDetectionDistance = 1.0f;
+        maxDetectionDistance = 10.0f;
+        enableDistanceScaling = true;
+        Debug.Log("[AprilTag] Detection range set to 1m - 10m with distance scaling enabled");
+    }
+
+    [ContextMenu("Disable Distance Scaling")]
+    public void DisableDistanceScaling()
+    {
+        enableDistanceScaling = false;
+        Debug.Log("[AprilTag] Distance scaling disabled - using raw distances");
+    }
+
+    [ContextMenu("Enable Distance Scaling")]
+    public void EnableDistanceScaling()
+    {
+        enableDistanceScaling = true;
+        Debug.Log("[AprilTag] Distance scaling enabled");
+    }
+
+
+    [ContextMenu("Debug Headset Movement")]
+    public void DebugHeadsetMovement()
+    {
+        var cam = GetCorrectCameraReference();
+        Debug.Log($"[AprilTag] Headset Debug Info:");
+        Debug.Log($"  - Camera Transform: {cam.name}");
+        Debug.Log($"  - Camera Position: {cam.position:F3}");
+        Debug.Log($"  - Camera Rotation: {cam.eulerAngles:F1}");
+        Debug.Log($"  - Camera Forward: {cam.forward:F3}");
+        Debug.Log($"  - Camera Right: {cam.right:F3}");
+        Debug.Log($"  - Camera Up: {cam.up:F3}");
+        Debug.Log($"  - Coordinate Correction: Disabled (removed to fix headset movement issues)");
+        Debug.Log($"  - Use Passthrough Raycasting: {usePassthroughRaycasting}");
+        
+        if (cam.GetComponent<Camera>() != null)
+        {
+            var camera = cam.GetComponent<Camera>();
+            Debug.Log($"  - Camera FOV: {camera.fieldOfView:F1}");
+            Debug.Log($"  - Camera Near: {camera.nearClipPlane:F3}");
+            Debug.Log($"  - Camera Far: {camera.farClipPlane:F3}");
+        }
+    }
+
+    // Quest-compatible debugging methods
+    public void ToggleDistanceScalingRuntime()
+    {
+        enableDistanceScaling = !enableDistanceScaling;
+        Debug.Log($"[AprilTag] Distance scaling {(enableDistanceScaling ? "enabled" : "disabled")} via runtime call");
+    }
+
+    public void SetPositionScaleFactor(float scale)
+    {
+        positionScaleFactor = scale;
+        Debug.Log($"[AprilTag] Position scale factor set to {scale} via runtime call");
+    }
+
+    public void LogCurrentSettings()
+    {
+        var cam = GetCorrectCameraReference();
+        Debug.Log($"[AprilTag] Current Settings:");
+        Debug.Log($"  - Position Scale Factor: {positionScaleFactor}");
+        Debug.Log($"  - Distance Scaling: {enableDistanceScaling}");
+        Debug.Log($"  - Passthrough Raycasting: {usePassthroughRaycasting}");
+        Debug.Log($"  - Min Detection Distance: {minDetectionDistance}");
+        Debug.Log($"  - Max Detection Distance: {maxDetectionDistance}");
+        Debug.Log($"  - Camera: {cam.name} at {cam.position:F3}");
+    }
+
+    private void HandleQuestDebugInput()
+    {
+        // Quest controller input handling for runtime calibration
+        if (enableConfigurationTool)
+        {
+            // Check if right grip is being held
+            bool rightGripHeld = OVRInput.Get(OVRInput.RawButton.RHandTrigger, OVRInput.Controller.RTouch);
+            
+            // Right A button = move cube right (or left if grip is held)
+            if (OVRInput.GetDown(OVRInput.RawButton.A, OVRInput.Controller.RTouch))
+            {
+                if (rightGripHeld)
                 {
-                    var centerEye = ovrCameraRig.transform.Find("TrackingSpace/CenterEyeAnchor");
-                    if (centerEye != null)
+                    cornerPositionOffset += new Vector3(-0.01f, 0f, 0f); // Move left
+                }
+                else
+                {
+                    cornerPositionOffset += new Vector3(0.01f, 0f, 0f); // Move right
+                }
+                SaveRuntimeOffset();
+                Debug.Log($"[AprilTag] Runtime Offset: X={cornerPositionOffset.x:F3}, Y={cornerPositionOffset.y:F3}, Z={cornerPositionOffset.z:F3}");
+            }
+            
+            // Right B button = move cube up (or down if grip is held)
+            if (OVRInput.GetDown(OVRInput.RawButton.B, OVRInput.Controller.RTouch))
+            {
+                if (rightGripHeld)
+                {
+                    cornerPositionOffset += new Vector3(0f, -0.01f, 0f); // Move down
+                }
+                else
+                {
+                    cornerPositionOffset += new Vector3(0f, 0.01f, 0f); // Move up
+                }
+                SaveRuntimeOffset();
+                Debug.Log($"[AprilTag] Runtime Offset: X={cornerPositionOffset.x:F3}, Y={cornerPositionOffset.y:F3}, Z={cornerPositionOffset.z:F3}");
+            }
+        }
+        
+        // Log the current settings every 5 seconds when debugging is enabled
+        if (enableAllDebugLogging && Time.frameCount % 300 == 0) // Every 5 seconds at 60fps
+        {
+            LogCurrentSettings();
+        }
+    }
+    
+    private void ResetDebugSettings()
+    {
+        enableAllDebugLogging = true;
+        usePassthroughRaycasting = true;
+        useImprovedIntrinsics = false;
+        testModeIdentityRotation = false;
+        worldLockedRotation = true;
+        visualizationScaleMultiplier = 1.0f;
+        Debug.Log("[AprilTag] Debug settings reset to defaults");
+    }
+    
+    // PhotonVision-inspired pose filtering implementation
+    // Based on PhotonVision's temporal filtering approach for stable pose estimation
+    private Vector3 FilterTagPosition(Vector3 rawPosition, Vector3 previousPosition, float deltaTime, bool isInitialized)
+    {
+        if (!enablePoseSmoothing || !isInitialized)
+        {
+            return rawPosition;
+        }
+        
+        // Exponential smoothing filter similar to PhotonVision's approach
+        // Uses time-based smoothing factor for frame-rate independence
+        float smoothingFactor = Mathf.Exp(-deltaTime / positionSmoothingTime);
+        
+        // Clamp smoothing factor to prevent instability
+        smoothingFactor = Mathf.Clamp01(smoothingFactor);
+        
+        // Apply exponential smoothing
+        Vector3 filteredPosition = Vector3.Lerp(rawPosition, previousPosition, smoothingFactor);
+        
+        if (enableAllDebugLogging && Time.frameCount % 300 == 0)
+        {
+            Debug.Log($"[AprilTag] Position Filter - Raw: {rawPosition:F3}, Filtered: {filteredPosition:F3}, Factor: {smoothingFactor:F3}");
+        }
+        
+        return filteredPosition;
+    }
+    
+    private Quaternion FilterTagRotation(Quaternion rawRotation, Quaternion previousRotation, float deltaTime, bool isInitialized)
+    {
+        if (!enablePoseSmoothing || !isInitialized)
+        {
+            return rawRotation;
+        }
+        
+        // Spherical linear interpolation for rotation smoothing
+        // Similar to PhotonVision's rotation filtering approach
+        float smoothingFactor = Mathf.Exp(-deltaTime / rotationSmoothingTime);
+        smoothingFactor = Mathf.Clamp01(smoothingFactor);
+        
+        // Use Slerp for smooth rotation interpolation
+        Quaternion filteredRotation = Quaternion.Slerp(rawRotation, previousRotation, smoothingFactor);
+        
+        return filteredRotation;
+    }
+    
+    // PhotonVision-inspired multi-frame validation
+    // Validates detections against recent history to reject outliers
+    private bool ValidateTagDetection(int tagId, Vector3 position, Quaternion rotation, float cornerQuality)
+    {
+        if (!enableMultiFrameValidation)
+        {
+            return true;
+        }
+        
+        // Initialize history queue if needed
+        if (!_detectionHistory.ContainsKey(tagId))
+        {
+            _detectionHistory[tagId] = new Queue<TagDetectionHistory>();
+        }
+        
+        var history = _detectionHistory[tagId];
+        
+        // If we don't have enough history, accept the detection
+        if (history.Count < 2)
+        {
+            history.Enqueue(new TagDetectionHistory(position, rotation, cornerQuality));
+            
+            // Limit history size (PhotonVision approach)
+            while (history.Count > validationFrameCount)
+            {
+                history.Dequeue();
+            }
+            
+            return true;
+        }
+        
+        // Calculate average position and rotation from recent history
+        Vector3 avgPosition = Vector3.zero;
+        Vector3 avgEulerAngles = Vector3.zero;
+        int validCount = 0;
+        
+        foreach (var detection in history)
+        {
+            if (detection.isValid && (Time.time - detection.timestamp) < 1.0f) // Only use recent detections
+            {
+                avgPosition += detection.position;
+                avgEulerAngles += detection.rotation.eulerAngles;
+                validCount++;
+            }
+        }
+        
+        if (validCount == 0)
+        {
+            return true; // No valid history, accept detection
+        }
+        
+        avgPosition /= validCount;
+        avgEulerAngles /= validCount;
+        
+        // Check position deviation (PhotonVision's consistency check approach)
+        float positionDeviation = Vector3.Distance(position, avgPosition);
+        if (positionDeviation > maxPositionDeviation)
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Tag {tagId} rejected - Position deviation: {positionDeviation:F3}m > {maxPositionDeviation:F3}m");
+            }
+            return false;
+        }
+        
+        // Check rotation deviation
+        Vector3 currentEuler = rotation.eulerAngles;
+        float rotationDeviation = Mathf.Max(
+            Mathf.Abs(Mathf.DeltaAngle(currentEuler.x, avgEulerAngles.x)),
+            Mathf.Abs(Mathf.DeltaAngle(currentEuler.y, avgEulerAngles.y)),
+            Mathf.Abs(Mathf.DeltaAngle(currentEuler.z, avgEulerAngles.z))
+        );
+        
+        if (rotationDeviation > maxRotationDeviation)
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Tag {tagId} rejected - Rotation deviation: {rotationDeviation:F1}° > {maxRotationDeviation:F1}°");
+            }
+            return false;
+        }
+        
+        // Detection passed validation, add to history
+        history.Enqueue(new TagDetectionHistory(position, rotation, cornerQuality));
+        
+        // Limit history size
+        while (history.Count > validationFrameCount)
+        {
+            history.Dequeue();
+        }
+        
+        return true;
+    }
+    
+    // PhotonVision-inspired corner quality assessment
+    // Analyzes corner sharpness and geometric consistency
+    private float CalculateCornerQuality(Vector2[] corners)
+    {
+        if (!enableCornerQualityAssessment || corners == null || corners.Length != 4)
+        {
+            return 1.0f; // Default quality if assessment disabled
+        }
+        
+        float quality = 1.0f;
+        
+        // Check geometric consistency (PhotonVision approach)
+        // Measure how close the corners are to forming a proper quadrilateral
+        
+        // Calculate side lengths
+        float[] sideLengths = new float[4];
+        for (int i = 0; i < 4; i++)
+        {
+            int nextIndex = (i + 1) % 4;
+            sideLengths[i] = Vector2.Distance(corners[i], corners[nextIndex]);
+        }
+        
+        // Check for degenerate cases (very small or very large sides)
+        float minSide = Mathf.Min(sideLengths);
+        float maxSide = Mathf.Max(sideLengths);
+        
+        if (minSide < 5.0f) // Too small in pixels
+        {
+            quality *= 0.3f;
+        }
+        
+        if (maxSide > 500.0f) // Too large, likely false detection
+        {
+            quality *= 0.5f;
+        }
+        
+        // Check aspect ratio consistency (should be roughly square for AprilTags)
+        float aspectRatio = maxSide / Mathf.Max(minSide, 0.1f);
+        if (aspectRatio > 3.0f) // Too elongated
+        {
+            quality *= 0.4f;
+        }
+        
+        // Check corner angles (should be close to 90 degrees for AprilTags)
+        float totalAngleDeviation = 0f;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2 prev = corners[(i + 3) % 4];
+            Vector2 curr = corners[i];
+            Vector2 next = corners[(i + 1) % 4];
+            
+            Vector2 v1 = (prev - curr).normalized;
+            Vector2 v2 = (next - curr).normalized;
+            
+            float angle = Vector2.Angle(v1, v2);
+            float angleDeviation = Mathf.Abs(angle - 90f);
+            totalAngleDeviation += angleDeviation;
+        }
+        
+        float avgAngleDeviation = totalAngleDeviation / 4f;
+        if (avgAngleDeviation > 30f) // Corners too far from 90 degrees
+        {
+            quality *= Mathf.Lerp(1.0f, 0.2f, (avgAngleDeviation - 30f) / 60f);
+        }
+        
+        // Check for convexity (corners should form a convex quadrilateral)
+        bool isConvex = true;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2 p1 = corners[i];
+            Vector2 p2 = corners[(i + 1) % 4];
+            Vector2 p3 = corners[(i + 2) % 4];
+            
+            // Cross product to check turn direction
+            float cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+            if (i == 0)
+            {
+                // Set expected sign
+            }
+            else if ((cross > 0) != (i % 2 == 1))
+            {
+                isConvex = false;
+                break;
+            }
+        }
+        
+        if (!isConvex)
+        {
+            quality *= 0.3f;
+        }
+        
+        // Clamp quality to valid range
+        quality = Mathf.Clamp01(quality);
+        
+        if (enableAllDebugLogging && Time.frameCount % 180 == 0) // Log every 3 seconds
+        {
+            Debug.Log($"[AprilTag] Corner Quality Assessment - Quality: {quality:F3}, AspectRatio: {aspectRatio:F2}, AngleDeviation: {avgAngleDeviation:F1}°, Convex: {isConvex}");
+        }
+        
+        return quality;
+    }
+    
+    // Extract corner coordinates from raw detection data (PhotonVision approach)
+    private Vector2[] ExtractCornersFromRawDetection(int tagId, List<object> rawDetections)
+    {
+        if (rawDetections == null || rawDetections.Count == 0)
+        {
+            return null;
+        }
+        
+        try
+        {
+            // Look for detection with matching ID
+            foreach (var detection in rawDetections)
+            {
+                if (detection == null) continue;
+                
+                var detectionType = detection.GetType();
+                
+                // Try to get ID field
+                var idField = detectionType.GetField("ID") ?? detectionType.GetField("id");
+                if (idField != null)
+                {
+                    var detectionId = idField.GetValue(detection);
+                    if (detectionId != null && detectionId.Equals(tagId))
                     {
-                        centerEyeAnchor = centerEye.gameObject;
-                        Debug.Log($"[AprilTagSceneSetup] Found CenterEyeAnchor from OVRCameraRig: {centerEyeAnchor.name}");
+                        // Found matching detection, extract corners
+                        var cornersField = detectionType.GetField("Corners") ?? 
+                                         detectionType.GetField("corners") ??
+                                         detectionType.GetField("Corner") ??
+                                         detectionType.GetField("corner");
+                        
+                        if (cornersField != null)
+                        {
+                            var cornersValue = cornersField.GetValue(detection);
+                            if (cornersValue is Vector2[] corners)
+                            {
+                                return corners;
+                            }
+                            else if (cornersValue is Array cornerArray && cornerArray.Length >= 4)
+                            {
+                                // Convert to Vector2 array
+                                Vector2[] convertedCorners = new Vector2[4];
+                                for (int i = 0; i < 4 && i < cornerArray.Length; i++)
+                                {
+                                    var corner = cornerArray.GetValue(i);
+                                    if (corner is Vector2 v2)
+                                    {
+                                        convertedCorners[i] = v2;
+                                    }
+                                    else
+                                    {
+                                        // Try to extract x, y fields
+                                        var cornerType = corner.GetType();
+                                        var xField = cornerType.GetField("x") ?? cornerType.GetField("X");
+                                        var yField = cornerType.GetField("y") ?? cornerType.GetField("Y");
+                                        
+                                        if (xField != null && yField != null)
+                                        {
+                                            float x = Convert.ToSingle(xField.GetValue(corner));
+                                            float y = Convert.ToSingle(yField.GetValue(corner));
+                                            convertedCorners[i] = new Vector2(x, y);
+                                        }
+                                    }
+                                }
+                                return convertedCorners;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (enableAllDebugLogging && Time.frameCount % 300 == 0)
+            {
+                Debug.LogWarning($"[AprilTag] Failed to extract corners for tag {tagId}: {ex.Message}");
+            }
+        }
+        
+        return null;
+    }
+    
+    
+    private List<object> GetRawDetections()
+    {
+        // Try to access raw detection data from the TagDetector using reflection
+        try
+        {
+            if (_detector == null)
+            {
+                return new List<object>();
+            }
+            
+            var detectorType = _detector.GetType();
+            
+            // Look for properties or fields that might contain raw detection data
+            var properties = detectorType.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            var fields = detectorType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            
+            // Try to find detection-related properties
+            foreach (var prop in properties)
+            {
+                if (prop.Name.ToLower().Contains("detection") && !prop.Name.ToLower().Contains("detectedtags"))
+                {
+                    try
+                    {
+                        var value = prop.GetValue(_detector);
+                        if (value != null)
+                        {
+                            if (value is System.Collections.IEnumerable enumerable)
+                            {
+                                var detections = new List<object>();
+                                foreach (var item in enumerable)
+                                {
+                                    detections.Add(item);
+                                }
+                                return detections;
+                            }
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"[AprilTag] Error accessing property {prop.Name}: {e.Message}");
                     }
                 }
             }
             
-            // Final fallback - look for main camera
-            if (centerEyeAnchor == null && Camera.main != null)
+            // Try fields as well
+            foreach (var field in fields)
             {
-                centerEyeAnchor = Camera.main.gameObject;
-                Debug.Log($"[AprilTagSceneSetup] Using Main Camera as CenterEyeAnchor: {centerEyeAnchor.name}");
+                if (field.Name.ToLower().Contains("detection") && !field.Name.ToLower().Contains("detectedtags"))
+                {
+                    try
+                    {
+                        var value = field.GetValue(_detector);
+                        if (value != null)
+                        {
+                            if (value is System.Collections.IEnumerable enumerable)
+                            {
+                                var detections = new List<object>();
+                                foreach (var item in enumerable)
+                                {
+                                    detections.Add(item);
+                                }
+                                return detections;
+                            }
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"[AprilTag] Error accessing field {field.Name}: {e.Message}");
+                    }
+                }
             }
             
-            if (centerEyeAnchor == null)
+            if (enableAllDebugLogging)
             {
-                Debug.LogWarning("[AprilTagSceneSetup] Could not find CenterEyeAnchor. Please ensure XROrigin or OVRCameraRig is in the scene.");
+                Debug.LogWarning("[AprilTag] No raw detection data found - corner detection will not work");
+            }
+        }
+        catch (Exception e)
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Error accessing raw detections: {e.Message}");
             }
         }
         
-        // Update reference camera if using center eye transform
-        if (useCenterEyeTransform && centerEyeAnchor != null)
+        return new List<object>();
+    }
+    
+    private Vector2? TryGetCornerBasedCenter(int tagId, List<object> rawDetections)
+    {
+        // Try to find the raw detection data for this specific tag ID and extract corner coordinates
+        try
         {
-            var camera = centerEyeAnchor.GetComponent<Camera>();
-            if (camera != null)
+            foreach (var detection in rawDetections)
             {
-                referenceCamera = camera;
-                Debug.Log($"[AprilTagSceneSetup] Set reference camera to CenterEyeAnchor camera: {referenceCamera.name}");
+                var detectionType = detection.GetType();
+                
+                // Try to get the ID field/property
+                var idProperty = detectionType.GetProperty("ID") ?? detectionType.GetProperty("Id") ?? detectionType.GetProperty("id");
+                var idField = detectionType.GetField("ID") ?? detectionType.GetField("Id") ?? detectionType.GetField("id");
+                
+                int detectionId = -1;
+                if (idProperty != null)
+                {
+                    detectionId = (int)idProperty.GetValue(detection);
+                }
+                else if (idField != null)
+                {
+                    detectionId = (int)idField.GetValue(detection);
+                }
+                
+                if (detectionId == tagId)
+                {
+                    // Found the matching detection, try to extract corner coordinates
+                    return ExtractCornerCenter(detection);
+                }
             }
         }
-    }
-
-    private void SetupEnvironmentRaycastManager()
-    {
-        var existingManager = FindFirstObjectByType<EnvironmentRaycastManager>();
-        if (existingManager == null)
+        catch (Exception e)
         {
-            if (createSimpleEnvironmentRaycastManager)
+            Debug.LogWarning($"[AprilTag] Error extracting corner center for tag {tagId}: {e.Message}");
+        }
+        
+        return null;
+    }
+    
+    private Vector2? TryGetCornerBasedCenterWithIntrinsics(int tagId, List<object> rawDetections, PassthroughCameraIntrinsics intrinsics)
+    {
+        // Try to find the raw detection data for this specific tag ID and extract corner coordinates with intrinsics
+        try
+        {
+            foreach (var detection in rawDetections)
             {
-                // Create a simple Environment Raycast Manager
-                var managerGO = new GameObject("EnvironmentRaycastManager");
-                environmentRaycastManager = managerGO.AddComponent<EnvironmentRaycastManager>();
+                var detectionType = detection.GetType();
                 
+                // Try to get the ID field/property
+                var idProperty = detectionType.GetProperty("ID") ?? detectionType.GetProperty("Id") ?? detectionType.GetProperty("id");
+                var idField = detectionType.GetField("ID") ?? detectionType.GetField("Id") ?? detectionType.GetField("id");
+                
+                int detectionId = -1;
+                if (idProperty != null)
+                {
+                    detectionId = (int)idProperty.GetValue(detection);
+                }
+                else if (idField != null)
+                {
+                    detectionId = (int)idField.GetValue(detection);
+                }
+                
+                if (detectionId == tagId)
+                {
+                    // Found the matching detection, try to extract corner coordinates with intrinsics
+                    return ExtractCornerCenterWithIntrinsics(detection, intrinsics);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[AprilTag] Error extracting corner center for tag {tagId}: {e.Message}");
+        }
+        
+        return null;
+    }
+    
+    private Vector2? ExtractCornerCenterWithIntrinsics(object detection, PassthroughCameraIntrinsics intrinsics)
+    {
+        // Extract corner coordinates from the Detection object and calculate center using camera intrinsics
+        try
+        {
+            var detectionType = detection.GetType();
+            
+            // Try to access corner coordinates based on the Detection structure we found
+            // The structure has: c0, c1, p00, p01, p10, p11, p20, p21, p30, p31
+            // But they might be stored as arrays or in a different format
+            var cornerFields = new[]
+            {
+                ("c0", "c1"),    // Corner 0
+                ("p00", "p01"),  // Corner 1  
+                ("p10", "p11"),  // Corner 2
+                ("p20", "p21")   // Corner 3
+            };
+            
+            // Also try alternative field names that might be used
+            var alternativeFields = new[]
+            {
+                ("c", "c"),      // Single field with array
+                ("p", "p"),      // Single field with array
+                ("corners", "corners"), // Array of corners
+                ("points", "points")    // Array of points
+            };
+            
+            var corners = new List<Vector2>();
+            
+            foreach (var (xField, yField) in cornerFields)
+            {
+                // Try to get field first, then property with more permissive binding flags
+                var xFieldRef = detectionType.GetField(xField, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var yFieldRef = detectionType.GetField(yField, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                
+                double x = 0, y = 0;
+                bool xFound = false, yFound = false;
+                
+                // Try to get X coordinate
+                if (xFieldRef != null)
+                {
+                    try
+                    {
+                        var xValue = xFieldRef.GetValue(detection);
+                        x = (double)xValue;
+                        xFound = true;
+                    }
+                    catch (Exception e)
+                    {
+                        if (enableAllDebugLogging)
+                        {
+                            Debug.LogWarning($"[AprilTag] Error getting {xField} field value: {e.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    var xProp = detectionType.GetProperty(xField);
+                    if (xProp != null)
+                    {
+                        try
+                        {
+                            var xValue = xProp.GetValue(detection);
+                            x = (double)xValue;
+                            xFound = true;
+                        }
+                        catch (Exception e)
+                        {
+                            if (enableAllDebugLogging)
+                            {
+                                Debug.LogWarning($"[AprilTag] Error getting {xField} property value: {e.Message}");
+                            }
+                        }
+                    }
+                }
+                
+                // Try to get Y coordinate
+                if (yFieldRef != null)
+                {
+                    try
+                    {
+                        var yValue = yFieldRef.GetValue(detection);
+                        y = (double)yValue;
+                        yFound = true;
+                    }
+                    catch (Exception e)
+                    {
+                        if (enableAllDebugLogging)
+                        {
+                            Debug.LogWarning($"[AprilTag] Error getting {yField} field value: {e.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    var yProp = detectionType.GetProperty(yField);
+                    if (yProp != null)
+                    {
+                        try
+                        {
+                            var yValue = yProp.GetValue(detection);
+                            y = (double)yValue;
+                            yFound = true;
+                        }
+                        catch (Exception e)
+                        {
+                            if (enableAllDebugLogging)
+                            {
+                                Debug.LogWarning($"[AprilTag] Error getting {yField} property value: {e.Message}");
+                            }
+                        }
+                    }
+                }
+                
+                if (xFound && yFound)
+                {
+                    // Convert coordinates using camera intrinsics for better alignment
+                    var unityCorner = ConvertAprilTagToUnityCoordinatesWithIntrinsics(x, y, intrinsics);
+                    corners.Add(unityCorner);
+                }
+            }
+            
+            if (corners.Count >= 4)
+            {
+                // Calculate center point from corners
+                var center = Vector2.zero;
+                foreach (var corner in corners)
+                {
+                    center += corner;
+                }
+                center /= corners.Count;
+                
+                return center;
             }
             else
             {
-                Debug.LogWarning("[AprilTagSceneSetup] No EnvironmentRaycastManager found and createSimpleEnvironmentRaycastManager is disabled. Please add one manually or enable createSimpleEnvironmentRaycastManager.");
+                // Try alternative field names
+                foreach (var (xField, yField) in alternativeFields)
+                {
+                    var xFieldRef = detectionType.GetField(xField, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var yFieldRef = detectionType.GetField(yField, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    
+                    if (xFieldRef != null && yFieldRef != null)
+                    {
+                        try
+                        {
+                            var xValue = xFieldRef.GetValue(detection);
+                            var yValue = yFieldRef.GetValue(detection);
+                            
+                            // Check if these are arrays
+                            if (xValue is System.Array xArray && yValue is System.Array yArray)
+                            {
+                                if (xArray.Length >= 4 && yArray.Length >= 4)
+                                {
+                                    for (int i = 0; i < 4; i++)
+                                    {
+                                        var x = Convert.ToDouble(xArray.GetValue(i));
+                                        var y = Convert.ToDouble(yArray.GetValue(i));
+                                        // Convert coordinates using camera intrinsics for better alignment
+                                        var unityCorner = ConvertAprilTagToUnityCoordinatesWithIntrinsics(x, y, intrinsics);
+                                        corners.Add(unityCorner);
+                                    }
+                                    
+                                    break;
+                                }
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            if (enableAllDebugLogging)
+                            {
+                                Debug.LogWarning($"[AprilTag] Error with alternative fields {xField}, {yField}: {e.Message}");
+                            }
+                        }
+                    }
+                }
+                
+                if (corners.Count >= 4)
+                {
+                    // Calculate center point from corners
+                    var center = Vector2.zero;
+                    foreach (var corner in corners)
+                    {
+                        center += corner;
+                    }
+                    center /= corners.Count;
+                    
+                    return center;
+                }
             }
+        }
+        catch (Exception e)
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Error extracting corner center: {e.Message}");
+            }
+        }
+        
+        return null;
+    }
+    
+    private Vector2 ConvertAprilTagToUnityCoordinates(double x, double y)
+    {
+        // Convert from AprilTag image coordinates to Unity screen coordinates
+        // Following MultiObjectDetection example exactly
+        // AprilTag: X-right, Y-down (image space)
+        // Unity: X-right, Y-up (screen space)
+        // MultiObjectDetection uses: (1.0f - perY) for Y flip
+        
+        return new Vector2((float)x, (float)y);
+    }
+    
+    private Vector2 ConvertAprilTagToUnityCoordinatesWithIntrinsics(double x, double y, PassthroughCameraIntrinsics intrinsics)
+    {
+        // Convert from AprilTag image coordinates to Unity screen coordinates using camera intrinsics
+        // This provides better alignment by accounting for camera-specific parameters
+        
+        // Normalize coordinates to [0,1] range
+        var perX = (float)x / intrinsics.Resolution.x;
+        var perY = (float)y / intrinsics.Resolution.y;
+        
+        // Apply Y-flip transformation like MultiObjectDetection: (1.0f - perY)
+        var flippedPerY = 1.0f - perY;
+        
+        // Convert back to pixel coordinates
+        var screenX = perX * intrinsics.Resolution.x;
+        var screenY = flippedPerY * intrinsics.Resolution.y;
+        
+        return new Vector2(screenX, screenY);
+    }
+    
+    private Quaternion GetWorldRotation(Quaternion aprilTagRotation, Vector3 tagWorldPosition)
+    {
+        if (testModeIdentityRotation)
+        {
+            // Test mode: use identity rotation to check if positioning is correct
+            return Quaternion.identity;
+        }
+        else if (worldLockedRotation)
+        {
+            // For world-locked tags, use a fixed rotation that doesn't change with headset movement
+            // This prevents the cube from rotating when the headset pose is reset
+            return Quaternion.identity * Quaternion.Euler(rotationOffset);
         }
         else
         {
-            environmentRaycastManager = existingManager;
+            // For normal tags, use corner-based rotation calculation
+            // This ensures the cube sits flat on the tag surface using actual corner coordinates
+            return GetCornerBasedRotation(0, new List<object>(), tagWorldPosition) * Quaternion.Euler(rotationOffset);
         }
-    }
-
-    private void UpdateAprilTagControllerWithQuestSettings()
-    {
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller == null)
-        {
-            Debug.LogWarning("[AprilTagSceneSetup] No AprilTagController found to update with Quest settings");
-            return;
-        }
-        
-        // Update Quest-specific settings using reflection
-        var controllerType = typeof(AprilTagController);
-        var usePassthroughRaycastingField = controllerType.GetField("usePassthroughRaycasting", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var environmentRaycastManagerField = controllerType.GetField("environmentRaycastManager", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var referenceCameraField = controllerType.GetField("referenceCamera", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var useCenterEyeTransformField = controllerType.GetField("useCenterEyeTransform", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-        usePassthroughRaycastingField?.SetValue(controller, enablePassthroughRaycasting);
-        environmentRaycastManagerField?.SetValue(controller, environmentRaycastManager);
-        
-        // Update reference camera from center eye anchor if available
-        if (useCenterEyeTransform && centerEyeAnchor != null)
-        {
-            var camera = centerEyeAnchor.GetComponent<Camera>();
-            if (camera != null)
-            {
-                referenceCameraField?.SetValue(controller, camera);
-                useCenterEyeTransformField?.SetValue(controller, true);
-                Debug.Log($"[AprilTagSceneSetup] Updated AprilTagController reference camera to CenterEyeAnchor: {camera.name}");
-            }
-        }
-
-    }
-
-    [ContextMenu("Setup Environment Raycast Manager Only")]
-    public void SetupEnvironmentRaycastManagerOnly()
-    {
-        SetupEnvironmentRaycastManager();
     }
     
-    [ContextMenu("Setup Center Eye Anchor Only")]
-    public void SetupCenterEyeAnchorOnly()
+    private Quaternion GetHeadsetRelativeRotation(Quaternion aprilTagRotation, Vector3 tagWorldPosition)
     {
-        SetupCenterEyeAnchor();
-        UpdateAprilTagControllerWithQuestSettings();
-    }
-
-    /// <summary>
-    /// Quest-compatible method to clean up duplicate permission panels
-    /// Call this from other scripts or UI buttons on Quest
-    /// </summary>
-    public void CleanUpDuplicatePanelsOnQuest()
-    {
-        CleanUpDuplicatePermissionPanels();
-    }
-
-    /// <summary>
-    /// Static method to clean up duplicate permission panels from anywhere
-    /// </summary>
-    public static void CleanUpDuplicatePermissionPanelsStatic()
-    {
-        // Find all AprilTagPermissionPanel GameObjects
-        var allPanels = GameObject.FindGameObjectsWithTag("Untagged")
-            .Where(go => go.name == "AprilTagPermissionPanel")
-            .ToArray();
-
-        if (allPanels.Length <= 1)
+        // Use corner-based rotation calculation similar to PhotonVision
+        // This ensures the cube sits flat on the tag surface using the actual corner coordinates
+        
+        // Get the current headset pose
+        var cam = GetCorrectCameraReference();
+        var currentHeadsetRotation = cam.rotation;
+        var currentHeadsetPosition = cam.position;
+        
+        // Initialize headset pose tracking on first frame
+        if (!_headsetPoseInitialized)
         {
-            Debug.Log("[AprilTagSceneSetup] No duplicate permission panels found");
-            return;
-        }
-
-        Debug.Log($"[AprilTagSceneSetup] Found {allPanels.Length} permission panels, cleaning up duplicates...");
-
-        // Keep the first one with a valid AprilTagPermissionUI component
-        GameObject keepPanel = null;
-        for (int i = 0; i < allPanels.Length; i++)
-        {
-            var ui = allPanels[i].GetComponent<AprilTagPermissionUI>();
-            if (ui != null)
-            {
-                keepPanel = allPanels[i];
-                break;
-            }
-        }
-
-        // If no panel has the component, keep the first one and add the component
-        if (keepPanel == null)
-        {
-            keepPanel = allPanels[0];
-            keepPanel.AddComponent<AprilTagPermissionUI>();
+            _lastHeadsetRotation = currentHeadsetRotation;
+            _lastHeadsetPosition = currentHeadsetPosition;
+            _headsetPoseInitialized = true;
             
-            // Get a scene setup instance to configure the UI
-            var sceneSetup = FindFirstObjectByType<AprilTagSceneSetup>();
-            if (sceneSetup != null)
+            if (enableAllDebugLogging)
             {
-                sceneSetup.ConfigurePermissionUI(keepPanel.GetComponent<AprilTagPermissionUI>());
+                Debug.Log($"[AprilTag] Initialized headset pose tracking - Rotation: {currentHeadsetRotation.eulerAngles}, Position: {currentHeadsetPosition}");
             }
         }
-
-        // Destroy all other panels
-        int destroyedCount = 0;
-        for (int i = 0; i < allPanels.Length; i++)
+        
+        // Calculate the headset's rotation change since last frame
+        var headsetRotationDelta = Quaternion.Inverse(_lastHeadsetRotation) * currentHeadsetRotation;
+        
+        // Apply the headset rotation change to the AprilTag rotation
+        // This keeps the cube orientation consistent with the headset's movement
+        var adjustedRotation = headsetRotationDelta * aprilTagRotation;
+        
+        // Update the last headset pose for next frame
+        _lastHeadsetRotation = currentHeadsetRotation;
+        _lastHeadsetPosition = currentHeadsetPosition;
+        
+        if (enableAllDebugLogging)
         {
-            if (allPanels[i] != keepPanel)
+            Debug.Log($"[AprilTag] Headset-relative rotation - AprilTag: {aprilTagRotation.eulerAngles}, Headset Delta: {headsetRotationDelta.eulerAngles}, Adjusted: {adjustedRotation.eulerAngles}");
+        }
+        
+        return adjustedRotation;
+    }
+    
+    private Quaternion GetCornerBasedRotation(int tagId, List<object> rawDetections, Vector3 tagWorldPosition)
+    {
+        // Use corner coordinates to calculate proper tag orientation
+        // This approach is similar to PhotonVision's method for ensuring tags sit flat
+        
+        try
+        {
+            // Find the detection for this tag
+            foreach (var detection in rawDetections)
             {
-                if (Application.isPlaying)
+                var idField = detection.GetType().GetField("id", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (idField != null)
                 {
-                    Destroy(allPanels[i]);
+                    var detectedId = (int)idField.GetValue(detection);
+                    if (detectedId == tagId)
+                    {
+                        // Extract corner coordinates
+                        var corners = ExtractCornerCoordinates(detection);
+                        if (corners.Count >= 4)
+                        {
+                            // Calculate tag orientation from corner coordinates
+                            return CalculateTagOrientationFromCorners(corners, tagWorldPosition);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Error calculating corner-based rotation: {e.Message}");
+            }
+        }
+        
+        // Fallback to AprilTag rotation if corner-based calculation fails
+        return Quaternion.identity;
+    }
+    
+    
+    private List<Vector2> ExtractCornerCoordinates(object detection)
+    {
+        var corners = new List<Vector2>();
+        
+        try
+        {
+            // Try to extract corner coordinates from the detection
+            var cornerFields = new[] { "c0", "c1", "p00", "p01", "p10", "p11", "p20", "p21", "p30", "p31" };
+            
+            for (int i = 0; i < cornerFields.Length; i += 2)
+            {
+                if (i + 1 < cornerFields.Length)
+                {
+                    var xField = detection.GetType().GetField(cornerFields[i], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var yField = detection.GetType().GetField(cornerFields[i + 1], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    
+                    if (xField != null && yField != null)
+                    {
+                        var x = (double)xField.GetValue(detection);
+                        var y = (double)yField.GetValue(detection);
+                        corners.Add(new Vector2((float)x, (float)y));
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Error extracting corner coordinates: {e.Message}");
+            }
+        }
+        
+        return corners;
+    }
+    
+    private Quaternion CalculateTagOrientationFromCorners(List<Vector2> corners, Vector3 tagWorldPosition)
+    {
+        if (corners.Count < 4) return Quaternion.identity;
+        
+        // Calculate the tag's orientation from corner coordinates
+        // This ensures the cube sits flat on the tag surface
+        
+        // Get camera reference for coordinate transformation
+        var cam = GetCorrectCameraReference();
+        
+        // Convert corner coordinates to world space using proper raycasting
+        var worldCorners = new List<Vector3>();
+        foreach (var corner in corners)
+        {
+            // Convert 2D corner to 3D world position using raycasting
+            var screenPos = new Vector2(corner.x, corner.y);
+            
+            // Use the existing GetWorldPositionFromCornerCenter method for consistency
+            // Create a temporary TagPose for the raycasting
+            var tempTagPose = new TagPose(0, tagWorldPosition, Quaternion.identity);
+            var worldPos = GetWorldPositionFromCornerCenter(screenPos, tempTagPose);
+            worldCorners.Add(worldPos);
+        }
+        
+        // Calculate the tag's surface normal from the corners
+        // This gives us the direction perpendicular to the tag surface
+        if (worldCorners.Count >= 4)
+        {
+            // Calculate two vectors on the tag surface using the correct corner order
+            // AprilTag corners are typically ordered: top-left, top-right, bottom-right, bottom-left
+            var v1 = (worldCorners[1] - worldCorners[0]); // top-right to top-left
+            var v2 = (worldCorners[2] - worldCorners[1]); // bottom-right to top-right
+            
+            // Check if vectors are valid (not zero length)
+            if (v1.magnitude > 0.001f && v2.magnitude > 0.001f)
+            {
+                v1 = v1.normalized;
+                v2 = v2.normalized;
+                
+                // Calculate the normal vector (perpendicular to the tag surface)
+                var normal = Vector3.Cross(v1, v2);
+                
+                // Check if normal is valid (not zero length)
+                if (normal.magnitude > 0.001f)
+                {
+                    normal = normal.normalized;
+                    
+                    // Create a rotation that aligns the cube with the tag surface
+                    // The cube should face the same direction as the tag
+                    
+                    // Calculate the tag's orientation from the corner vectors
+                    // Use the tag's actual edge directions for proper alignment
+                    var tagRight = v1; // First edge vector (top edge)
+                    var tagUp = Vector3.Cross(normal, tagRight).normalized; // Perpendicular to normal and right
+                    
+                    // Create a rotation matrix from the tag's coordinate system
+                    var tagRotation = Quaternion.LookRotation(normal, tagUp);
+                    
+                    // Apply a 90-degree rotation around X-axis to align with AprilTag orientation
+                    // and a 45-degree counterclockwise rotation around Z-axis to fix alignment
+                    // This ensures the cube sits flat on the tag surface
+                    var cubeRotation = tagRotation * Quaternion.Euler(0f, 0f, -225f);
+                    
+                    if (enableAllDebugLogging)
+                    {
+                        Debug.Log($"[AprilTag] Corner-based rotation - Normal: {normal}, Cube Rotation: {cubeRotation.eulerAngles}");
+                    }
+                    
+                    return cubeRotation;
                 }
                 else
                 {
-                    DestroyImmediate(allPanels[i]);
+                    if (enableAllDebugLogging)
+                    {
+                        Debug.LogWarning($"[AprilTag] Invalid normal vector from corners - v1: {v1}, v2: {v2}");
+                    }
                 }
-                destroyedCount++;
             }
-        }
-
-        Debug.Log($"[AprilTagSceneSetup] Cleaned up {destroyedCount} duplicate permission panels. Kept: {keepPanel.name}");
-    }
-
-    private void CleanUpDuplicatePermissionPanels()
-    {
-        // Find all AprilTagPermissionPanel GameObjects
-        var allPanels = GameObject.FindGameObjectsWithTag("Untagged")
-            .Where(go => go.name == "AprilTagPermissionPanel")
-            .ToArray();
-
-        if (allPanels.Length <= 1)
-        {
-            Debug.Log("[AprilTagSceneSetup] No duplicate permission panels found");
-            return;
-        }
-
-        Debug.Log($"[AprilTagSceneSetup] Found {allPanels.Length} permission panels, cleaning up duplicates...");
-
-        // Keep the first one with a valid AprilTagPermissionUI component
-        GameObject keepPanel = null;
-        for (int i = 0; i < allPanels.Length; i++)
-        {
-            var ui = allPanels[i].GetComponent<AprilTagPermissionUI>();
-            if (ui != null)
+            else
             {
-                keepPanel = allPanels[i];
-                break;
+                if (enableAllDebugLogging)
+                {
+                    Debug.LogWarning($"[AprilTag] Invalid corner vectors - v1: {v1}, v2: {v2}");
+                }
             }
         }
-
-        // If no panel has the component, keep the first one and add the component
-        if (keepPanel == null)
-        {
-            keepPanel = allPanels[0];
-            keepPanel.AddComponent<AprilTagPermissionUI>();
-            ConfigurePermissionUI(keepPanel.GetComponent<AprilTagPermissionUI>());
-        }
-
-        // Destroy all other panels
-        int destroyedCount = 0;
-        for (int i = 0; i < allPanels.Length; i++)
-        {
-            if (allPanels[i] != keepPanel)
-            {
-                if (Application.isPlaying)
-                {
-                    Destroy(allPanels[i]);
-                }
-                else
-                {
-                    DestroyImmediate(allPanels[i]);
-                }
-                destroyedCount++;
-            }
-        }
-
-        Debug.Log($"[AprilTagSceneSetup] Cleaned up {destroyedCount} duplicate permission panels. Kept: {keepPanel.name}");
-    }
-
-    // User Runtime Offset Management Methods
-    private void ApplyUserRuntimeOffset(AprilTagController controller)
-    {
-        if (controller == null) return;
         
-        // Use reflection to set the cornerPositionOffset field directly
-        var controllerType = typeof(AprilTagController);
-        var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
-        cornerPositionOffsetField?.SetValue(controller, userRuntimeOffset);
-        
-        // Save to PlayerPrefs if enabled
-        if (saveUserOffsetToPersistence)
-        {
-            SaveUserOffsetToPlayerPrefs();
-        }
-        
-        Debug.Log($"[AprilTagSceneSetup] Applied user runtime offset: {userRuntimeOffset}");
+        return Quaternion.identity;
     }
     
-    private void SaveUserOffsetToPlayerPrefs()
+    private void ResetHeadsetPoseTracking()
     {
-        PlayerPrefs.SetFloat("AprilTag_CornerOffset_X", userRuntimeOffset.x);
-        PlayerPrefs.SetFloat("AprilTag_CornerOffset_Y", userRuntimeOffset.y);
-        PlayerPrefs.SetFloat("AprilTag_CornerOffset_Z", userRuntimeOffset.z);
-        PlayerPrefs.Save();
-        Debug.Log($"[AprilTagSceneSetup] Saved user runtime offset to PlayerPrefs: {userRuntimeOffset}");
+        // Reset headset pose tracking - useful when the headset pose is reset
+        _headsetPoseInitialized = false;
+        _lastHeadsetRotation = Quaternion.identity;
+        _lastHeadsetPosition = Vector3.zero;
     }
     
-    private void LoadUserOffsetFromPlayerPrefs()
+    private void SaveRuntimeOffset()
     {
-        if (PlayerPrefs.HasKey("AprilTag_CornerOffset_X"))
+        if (saveRuntimeOffset)
         {
-            userRuntimeOffset = new Vector3(
+            PlayerPrefs.SetFloat("AprilTag_CornerOffset_X", cornerPositionOffset.x);
+            PlayerPrefs.SetFloat("AprilTag_CornerOffset_Y", cornerPositionOffset.y);
+            PlayerPrefs.SetFloat("AprilTag_CornerOffset_Z", cornerPositionOffset.z);
+            PlayerPrefs.Save();
+        }
+    }
+    
+    private void LoadRuntimeOffset()
+    {
+        if (saveRuntimeOffset && PlayerPrefs.HasKey("AprilTag_CornerOffset_X"))
+        {
+            cornerPositionOffset = new Vector3(
                 PlayerPrefs.GetFloat("AprilTag_CornerOffset_X", 0f),
                 PlayerPrefs.GetFloat("AprilTag_CornerOffset_Y", 0f),
                 PlayerPrefs.GetFloat("AprilTag_CornerOffset_Z", 0f)
             );
-            Debug.Log($"[AprilTagSceneSetup] Loaded user runtime offset from PlayerPrefs: {userRuntimeOffset}");
+            Debug.Log($"[AprilTag] Loaded runtime offset: {cornerPositionOffset}");
         }
     }
     
-    /// <summary>
-    /// Set the user runtime offset values (X, Y, Z in meters)
-    /// </summary>
-    /// <param name="offset">The offset values to apply</param>
-    public void SetUserRuntimeOffset(Vector3 offset)
+    private Quaternion ConvertAprilTagRotationToWorldSpace(Quaternion aprilTagRotation)
     {
-        userRuntimeOffset = offset;
-        useUserRuntimeOffset = true;
+        // Convert AprilTag rotation to world-locked rotation
+        // For world-locked tags, we want the rotation to be independent of camera movement
         
-        // Apply to existing controller if available
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
+        // Simply convert AprilTag rotation to Unity coordinate system
+        // This gives us the tag's orientation relative to the world, not the camera
+        var worldRotation = ConvertAprilTagRotationToUnity(aprilTagRotation);
+        
+        return worldRotation;
+    }
+    
+    private Quaternion ConvertAprilTagRotationToUnity(Quaternion aprilTagRotation)
+    {
+        // Convert AprilTag rotation to Unity rotation
+        // Apply coordinate system transformation
+        // This handles the Z-axis rotation mapping to X-axis rotation issue
+        var convertedRotation = aprilTagRotation;
+        // Apply 180-degree rotation around Y-axis to align coordinate systems
+        var coordinateTransform = Quaternion.Euler(0f, 0f, 0f);
+        convertedRotation = coordinateTransform * convertedRotation;
+        
+        // Reassign axes for coordinate system mapping
+        var eulerAngles = convertedRotation.eulerAngles;
+        var x = eulerAngles.x;
+        var y = eulerAngles.y;
+        var z = eulerAngles.z;
+        
+        // Reassign axes (modify these to test different mappings)
+        var newX = -x;  // Try: y, z, -x, -y, -z
+        var newY = y;  // Try: x, z, -x, -y, -z
+        var newZ = z;  // Try: x, y, -x, -y, -z
+        
+        convertedRotation = Quaternion.Euler(newX, newY, newZ);
+        
+        return convertedRotation;
+    }
+    
+    private Vector2? ExtractCornerCenter(object detection)
+    {
+        // Extract corner coordinates from the Detection object and calculate center
+        try
         {
-            ApplyUserRuntimeOffset(controller);
+            var detectionType = detection.GetType();
+            
+            
+            // Try to access corner coordinates based on the Detection structure we found
+            // The structure has: c0, c1, p00, p01, p10, p11, p20, p21, p30, p31
+            // But they might be stored as arrays or in a different format
+            var cornerFields = new[]
+            {
+                ("c0", "c1"),    // Corner 0
+                ("p00", "p01"),  // Corner 1  
+                ("p10", "p11"),  // Corner 2
+                ("p20", "p21")   // Corner 3
+            };
+            
+            // Also try alternative field names that might be used
+            var alternativeFields = new[]
+            {
+                ("c", "c"),      // Single field with array
+                ("p", "p"),      // Single field with array
+                ("corners", "corners"), // Array of corners
+                ("points", "points")    // Array of points
+            };
+            
+            var corners = new List<Vector2>();
+            
+            foreach (var (xField, yField) in cornerFields)
+            {
+                // Try to get field first, then property with more permissive binding flags
+                var xFieldRef = detectionType.GetField(xField, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var yFieldRef = detectionType.GetField(yField, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                
+                
+                double x = 0, y = 0;
+                bool xFound = false, yFound = false;
+                
+                // Try to get X coordinate
+                if (xFieldRef != null)
+                {
+                    try
+                    {
+                        var xValue = xFieldRef.GetValue(detection);
+                        x = (double)xValue;
+                        xFound = true;
+                    }
+                    catch (Exception e)
+                    {
+                        if (enableAllDebugLogging)
+                        {
+                            Debug.LogWarning($"[AprilTag] Error getting {xField} field value: {e.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    var xProp = detectionType.GetProperty(xField);
+                    if (xProp != null)
+                    {
+                        try
+                        {
+                            var xValue = xProp.GetValue(detection);
+                            x = (double)xValue;
+                            xFound = true;
+                        }
+                        catch (Exception e)
+                        {
+                            if (enableAllDebugLogging)
+                            {
+                                Debug.LogWarning($"[AprilTag] Error getting {xField} property value: {e.Message}");
+                            }
+                        }
+                    }
+                }
+                
+                // Try to get Y coordinate
+                if (yFieldRef != null)
+                {
+                    try
+                    {
+                        var yValue = yFieldRef.GetValue(detection);
+                        y = (double)yValue;
+                        yFound = true;
+                    }
+                    catch (Exception e)
+                    {
+                        if (enableAllDebugLogging)
+                        {
+                            Debug.LogWarning($"[AprilTag] Error getting {yField} field value: {e.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    var yProp = detectionType.GetProperty(yField);
+                    if (yProp != null)
+                    {
+                        try
+                        {
+                            var yValue = yProp.GetValue(detection);
+                            y = (double)yValue;
+                            yFound = true;
+                        }
+                        catch (Exception e)
+                        {
+                            if (enableAllDebugLogging)
+                            {
+                                Debug.LogWarning($"[AprilTag] Error getting {yField} property value: {e.Message}");
+                            }
+                        }
+                    }
+                }
+                
+                if (xFound && yFound)
+                {
+                    // Convert coordinates from AprilTag's right-handed to Unity's left-handed coordinate system
+                    var unityCorner = ConvertAprilTagToUnityCoordinates(x, y);
+                    corners.Add(unityCorner);
+                }
+            }
+            
+            if (corners.Count >= 4)
+            {
+                // Calculate center point from corners
+                var center = Vector2.zero;
+                foreach (var corner in corners)
+                {
+                    center += corner;
+                }
+                center /= corners.Count;
+                
+                
+                return center;
+            }
+            else
+            {
+                // Try alternative field names
+                foreach (var (xField, yField) in alternativeFields)
+                {
+                    var xFieldRef = detectionType.GetField(xField, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var yFieldRef = detectionType.GetField(yField, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    
+                    if (xFieldRef != null && yFieldRef != null)
+                    {
+                        try
+                        {
+                            var xValue = xFieldRef.GetValue(detection);
+                            var yValue = yFieldRef.GetValue(detection);
+                            
+                            // Check if these are arrays
+                            if (xValue is System.Array xArray && yValue is System.Array yArray)
+                            {
+                                if (xArray.Length >= 4 && yArray.Length >= 4)
+                                {
+                                    for (int i = 0; i < 4; i++)
+                                    {
+                                        var x = Convert.ToDouble(xArray.GetValue(i));
+                                        var y = Convert.ToDouble(yArray.GetValue(i));
+                                        // Convert coordinates from AprilTag's right-handed to Unity's left-handed coordinate system
+                                        var unityCorner = ConvertAprilTagToUnityCoordinates(x, y);
+                                        corners.Add(unityCorner);
+                                    }
+                                    
+                                    break;
+                                }
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            if (enableAllDebugLogging)
+                            {
+                                Debug.LogWarning($"[AprilTag] Error with alternative fields {xField}, {yField}: {e.Message}");
+                            }
+                        }
+                    }
+                }
+                
+                if (corners.Count >= 4)
+                {
+                    // Calculate center point from corners
+                    var center = Vector2.zero;
+                    foreach (var corner in corners)
+                    {
+                        center += corner;
+                    }
+                    center /= corners.Count;
+                    
+                    return center;
+                }
+            }
         }
-        
-        Debug.Log($"[AprilTagSceneSetup] Set user runtime offset: {userRuntimeOffset}");
-    }
-    
-    /// <summary>
-    /// Set individual user runtime offset components
-    /// </summary>
-    /// <param name="x">X offset in meters</param>
-    /// <param name="y">Y offset in meters</param>
-    /// <param name="z">Z offset in meters</param>
-    public void SetUserRuntimeOffset(float x, float y, float z)
-    {
-        SetUserRuntimeOffset(new Vector3(x, y, z));
-    }
-    
-    /// <summary>
-    /// Get the current user runtime offset values
-    /// </summary>
-    /// <returns>The current user runtime offset</returns>
-    public Vector3 GetUserRuntimeOffset()
-    {
-        return userRuntimeOffset;
-    }
-    
-    /// <summary>
-    /// Enable or disable user runtime offset
-    /// </summary>
-    /// <param name="enabled">Whether to use user runtime offset</param>
-    public void SetUserRuntimeOffsetEnabled(bool enabled)
-    {
-        useUserRuntimeOffset = enabled;
-        
-        // Apply changes to existing controller if available
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
+        catch (Exception e)
         {
-            Vector3 finalOffset = useUserRuntimeOffset ? userRuntimeOffset : cornerPositionOffset;
-            ApplyUserRuntimeOffset(controller);
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Error extracting corner center: {e.Message}");
+            }
         }
         
-        Debug.Log($"[AprilTagSceneSetup] User runtime offset {(enabled ? "enabled" : "disabled")}");
-    }
-
-    // Context Menu Methods for Easy Configuration
-    [ContextMenu("Load User Offset from PlayerPrefs")]
-    public void LoadUserOffsetFromPlayerPrefsMenu()
-    {
-        LoadUserOffsetFromPlayerPrefs();
+        return null;
     }
     
-    [ContextMenu("Save User Offset to PlayerPrefs")]
-    public void SaveUserOffsetToPlayerPrefsMenu()
+    private Vector3 GetWorldPositionFromCornerCenter(Vector2 cornerCenter, TagPose tagPose)
     {
-        SaveUserOffsetToPlayerPrefs();
-    }
-    
-    [ContextMenu("Apply User Runtime Offset")]
-    public void ApplyUserRuntimeOffsetMenu()
-    {
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
+        // Follow MultiObjectDetection pattern exactly for 2D-to-3D projection
+        try
         {
-            ApplyUserRuntimeOffset(controller);
+            // Get camera intrinsics and resolution
+            var eye = GetWebCamManagerEye();
+            var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
+            var camRes = intrinsics.Resolution;
+            
+            // Convert corner center to normalized coordinates (0-1 range)
+            var perX = cornerCenter.x / camRes.x;
+            var perY = cornerCenter.y / camRes.y;
+            
+            // Apply Y-flip transformation like MultiObjectDetection: (1.0f - perY)
+            var flippedPerY = 1.0f - perY;
+            
+            // Convert to pixel coordinates with Y-flip
+            var centerPixel = new Vector2Int(
+                Mathf.RoundToInt(perX * camRes.x), 
+                Mathf.RoundToInt(flippedPerY * camRes.y)
+            );
+            
+            // Create ray from screen point using proper camera intrinsics
+            var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(eye, centerPixel);
+            
+            // Use environment raycasting to place object on ground (like the working method)
+            if (environmentRaycastManager != null)
+            {
+                if (environmentRaycastManager.Raycast(ray, out var hitInfo))
+                {
+                    if (enableAllDebugLogging)
+                    {
+                        Debug.Log($"[AprilTag] Corner-based positioning hit at: {hitInfo.point}");
+                    }
+                    return hitInfo.point;
+                }
+                else
+                {
+                    if (enableAllDebugLogging)
+                    {
+                        Debug.LogWarning("[AprilTag] Corner-based positioning: Environment raycast missed, using fallback");
+                    }
+                }
+            }
+            
+            // Fallback: use AprilTag's 3D pose directly for more accurate positioning
+            var cam = GetCorrectCameraReference();
+            var adjustedPosition = (tagPose.Position + positionOffset) * positionScaleFactor;
+            var worldPosition = cam.position + cam.rotation * adjustedPosition;
+            
+            if (enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Corner-based positioning fallback: {worldPosition}");
+            }
+            
+            return worldPosition;
         }
-        else
+        catch (Exception e)
         {
-            Debug.LogWarning("[AprilTagSceneSetup] No AprilTagController found to apply offset to");
+            if (enableAllDebugLogging)
+            {
+                Debug.LogWarning($"[AprilTag] Error in corner-based positioning: {e.Message}");
+            }
+            
+            // Final fallback to 3D pose estimation
+            return tagPose.Position * positionScaleFactor;
         }
     }
     
-    [ContextMenu("Reset User Runtime Offset")]
-    public void ResetUserRuntimeOffset()
+    private void SaveDebugImage(Color32[] pixels, int width, int height)
     {
-        userRuntimeOffset = Vector3.zero;
-        useUserRuntimeOffset = false;
-        
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
+        try
         {
-            // Reset to default corner offset
-            var controllerType = typeof(AprilTagController);
-            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            cornerPositionOffsetField?.SetValue(controller, cornerPositionOffset);
+            var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            
+            var bytes = tex.EncodeToPNG();
+            var path = System.IO.Path.Combine(Application.dataPath, "..", "AprilTag_Debug.png");
+            System.IO.File.WriteAllBytes(path, bytes);
+            
+            Debug.Log($"[AprilTag] Saved debug image to: {path}");
+            
+            Destroy(tex);
         }
-        
-        Debug.Log("[AprilTagSceneSetup] Reset user runtime offset to zero and disabled user offset");
-    }
-    
-    [ContextMenu("Log Current Offset Settings")]
-    public void LogCurrentOffsetSettings()
-    {
-        Debug.Log($"[AprilTagSceneSetup] Current Offset Settings:");
-        Debug.Log($"  - Use User Runtime Offset: {useUserRuntimeOffset}");
-        Debug.Log($"  - User Runtime Offset: {userRuntimeOffset}");
-        Debug.Log($"  - Default Corner Offset: {cornerPositionOffset}");
-        Debug.Log($"  - Apply On Setup: {applyUserOffsetOnSetup}");
-        Debug.Log($"  - Save To Persistence: {saveUserOffsetToPersistence}");
-        
-        var controller = FindFirstObjectByType<AprilTagController>();
-        if (controller != null)
+        catch (Exception e)
         {
-            var controllerType = typeof(AprilTagController);
-            var cornerPositionOffsetField = controllerType.GetField("cornerPositionOffset", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var currentOffset = cornerPositionOffsetField?.GetValue(controller);
-            Debug.Log($"  - Current Controller Offset: {currentOffset}");
+            Debug.LogError($"[AprilTag] Failed to save debug image: {e.Message}");
         }
     }
-    
-    [ContextMenu("Set Common Experimental Offsets/Small Forward Adjustment")]
-    public void SetSmallForwardAdjustment()
-    {
-        SetUserRuntimeOffset(0.01f, 0f, 0.02f); // Small forward and right adjustment
-        Debug.Log("[AprilTagSceneSetup] Applied small forward adjustment offset");
-    }
-    
-    [ContextMenu("Set Common Experimental Offsets/Medium Calibration")]
-    public void SetMediumCalibration()
-    {
-        SetUserRuntimeOffset(0.03f, 0.01f, 0.05f); // Medium calibration
-        Debug.Log("[AprilTagSceneSetup] Applied medium calibration offset");
-    }
-    
-    [ContextMenu("Set Common Experimental Offsets/Large Calibration")]
-    public void SetLargeCalibration()
-    {
-        SetUserRuntimeOffset(0.05f, 0.02f, 0.08f); // Large calibration
-        Debug.Log("[AprilTagSceneSetup] Applied large calibration offset");
-    }
-    
-
 }
