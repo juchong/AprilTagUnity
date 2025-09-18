@@ -431,18 +431,12 @@ namespace AprilTag
             var state = _placementStates[tagId];
             state.isPlacementInProgress = true;
 
-            // Use assigned prefab
+            // Create or use default prefab
             var prefab = anchorPrefab;
             if (prefab == null)
             {
-                if (enableDebugLogging)
-                {
-                    Debug.LogWarning("[AprilTagSpatialAnchorManager] No anchor prefab assigned - creating minimal anchor without visualization");
-                }
-                
-                // Create minimal anchor GameObject without visual representation
-                prefab = new GameObject("AprilTag_SpatialAnchor");
-                prefab.AddComponent<global::OVRSpatialAnchor>();
+                // Create a proper prefab for the anchor with visual representation
+                prefab = CreateDefaultAnchorPrefab();
             }
 
             // Create the anchor GameObject directly
@@ -885,6 +879,115 @@ namespace AprilTag
             }
         }
         
+        /// <summary>
+        /// Create a default anchor prefab with visual representation
+        /// </summary>
+        private GameObject CreateDefaultAnchorPrefab()
+        {
+            // Create the main anchor GameObject
+            var anchorGO = new GameObject("AprilTag_SpatialAnchor");
+            
+            // Add the required OVRSpatialAnchor component
+            anchorGO.AddComponent<global::OVRSpatialAnchor>();
+            
+            // Create a visual representation child object
+            var visualGO = new GameObject("Visual");
+            visualGO.transform.SetParent(anchorGO.transform);
+            visualGO.transform.localPosition = Vector3.zero;
+            visualGO.transform.localRotation = Quaternion.identity;
+            visualGO.transform.localScale = Vector3.one;
+            
+            // Add a simple cube mesh for visualization
+            var meshFilter = visualGO.AddComponent<MeshFilter>();
+            var meshRenderer = visualGO.AddComponent<MeshRenderer>();
+            
+            // Create a simple cube mesh
+            var cubeMesh = CreateCubeMesh();
+            meshFilter.mesh = cubeMesh;
+            
+            // Create a material for the anchor
+            var material = CreateAnchorMaterial();
+            meshRenderer.material = material;
+            
+            // Scale the visual to be small and unobtrusive
+            visualGO.transform.localScale = Vector3.one * 0.1f; // 10cm cube
+            
+            if (enableDebugLogging)
+            {
+                Debug.Log("[AprilTagSpatialAnchorManager] Created default anchor prefab with visual representation");
+            }
+            
+            return anchorGO;
+        }
+        
+        /// <summary>
+        /// Create a simple cube mesh for anchor visualization
+        /// </summary>
+        private Mesh CreateCubeMesh()
+        {
+            var mesh = new Mesh();
+            mesh.name = "AnchorCube";
+            
+            // Simple cube vertices
+            var vertices = new Vector3[]
+            {
+                // Front face
+                new Vector3(-0.5f, -0.5f,  0.5f),
+                new Vector3( 0.5f, -0.5f,  0.5f),
+                new Vector3( 0.5f,  0.5f,  0.5f),
+                new Vector3(-0.5f,  0.5f,  0.5f),
+                // Back face
+                new Vector3(-0.5f, -0.5f, -0.5f),
+                new Vector3(-0.5f,  0.5f, -0.5f),
+                new Vector3( 0.5f,  0.5f, -0.5f),
+                new Vector3( 0.5f, -0.5f, -0.5f)
+            };
+            
+            // Simple cube triangles
+            var triangles = new int[]
+            {
+                // Front face
+                0, 2, 1, 0, 3, 2,
+                // Back face
+                4, 6, 5, 4, 7, 6,
+                // Left face
+                4, 3, 0, 4, 5, 3,
+                // Right face
+                1, 2, 6, 1, 6, 7,
+                // Top face
+                3, 5, 2, 2, 5, 6,
+                // Bottom face
+                0, 1, 4, 1, 7, 4
+            };
+            
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
+            mesh.RecalculateNormals();
+            
+            return mesh;
+        }
+        
+        /// <summary>
+        /// Create a material for the anchor visualization
+        /// </summary>
+        private Material CreateAnchorMaterial()
+        {
+            var material = new Material(Shader.Find("Standard"));
+            material.name = "AprilTagAnchorMaterial";
+            
+            // Set a distinctive color for spatial anchors
+            material.color = new Color(0.2f, 0.8f, 1.0f, 0.8f); // Light blue with transparency
+            material.SetFloat("_Mode", 3); // Transparent mode
+            material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            material.SetInt("_ZWrite", 0);
+            material.DisableKeyword("_ALPHATEST_ON");
+            material.EnableKeyword("_ALPHABLEND_ON");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            material.renderQueue = 3000;
+            
+            return material;
+        }
 
         /// <summary>
         /// Find the tag ID for a given anchor based on position

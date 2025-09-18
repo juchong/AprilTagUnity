@@ -118,6 +118,9 @@ public class AprilTagController : MonoBehaviour
     [SerializeField] private bool enableSpatialAnchors = true;
     [Tooltip("Spatial anchor manager component (auto-created if null)")]
     [SerializeField] private AprilTagSpatialAnchorManager spatialAnchorManager;
+    [Tooltip("Detection confidence threshold for anchor placement (0.0 - 1.0)")]
+    [Range(0.0f, 1.0f)]
+    [SerializeField] private float anchorConfidenceThreshold = 0.1f; // Lowered to allow low-confidence tags
 
     // CPU buffers
     private Color32[] _rgba;
@@ -256,9 +259,14 @@ public class AprilTagController : MonoBehaviour
         if (spatialAnchorManager != null)
         {
             // Use reflection to set the confidence threshold
+            var managerType = typeof(AprilTagSpatialAnchorManager);
+            var confidenceField = managerType.GetField("minConfidenceThreshold", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            confidenceField?.SetValue(spatialAnchorManager, anchorConfidenceThreshold);
+            
             if (enableAllDebugLogging)
             {
-                Debug.Log($"[AprilTag] Spatial anchor manager initialized");
+                Debug.Log($"[AprilTag] Spatial anchor manager initialized with confidence threshold: {anchorConfidenceThreshold}");
             }
         }
     }
@@ -725,7 +733,7 @@ public class AprilTagController : MonoBehaviour
             // Debug logging for confidence values
             if (enableAllDebugLogging)
             {
-                Debug.Log($"[AprilTag] Tag {tag.ID} confidence: {confidence:F3}");
+                Debug.Log($"[AprilTag] Tag {tag.ID} confidence: {confidence:F3} (threshold: {anchorConfidenceThreshold:F3})");
             }
             
             // Get the filtered pose for this tag
@@ -1350,6 +1358,26 @@ public class AprilTagController : MonoBehaviour
         }
     }
 
+    [ContextMenu("Setup Environment Raycast Manager")]
+    public void SetupEnvironmentRaycastManager()
+    {
+        if (environmentRaycastManager == null)
+        {
+            environmentRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
+            if (environmentRaycastManager != null)
+            {
+                Debug.Log($"[AprilTag] Found and assigned EnvironmentRaycastManager: {environmentRaycastManager.name}");
+            }
+            else
+            {
+                Debug.LogWarning("[AprilTag] No EnvironmentRaycastManager found in scene. Please add one from the MultiObjectDetection sample or disable usePassthroughRaycasting.");
+            }
+        }
+        else
+        {
+            Debug.Log($"[AprilTag] EnvironmentRaycastManager already assigned: {environmentRaycastManager.name}");
+        }
+    }
 
     [ContextMenu("Calibrate Position Scale")]
     public void CalibratePositionScale()
