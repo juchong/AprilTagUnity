@@ -34,6 +34,8 @@ Recordings/
 *.burst
 *.burst.debug
 *.burst.safetychecks
+**/tempburstlibs/
+lib_burst_generated.txt
 
 # Generated solution & project files (Unity can regenerate these)
 *.csproj
@@ -48,6 +50,9 @@ Recordings/
 *.svd
 *.pdb
 *.mdb
+
+# Build artifacts and temporary assemblies
+TempAssembly.dll
 
 # TextMesh Pro auto-generated font atlas (safe to regen)
 *.asset.meta~          # temp metas
@@ -87,6 +92,11 @@ DerivedData/
 *.DotSettings.user
 # VS Code (project-wide settings are often user-specific; keep if your team wants them)
 .vscode/
+# Cursor AI IDE
+.cursor/
+# Visual Studio configuration
+.vsconfig
+launch.json
 # MonoDevelop
 *.userprefs
 
