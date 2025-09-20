@@ -73,6 +73,9 @@ gradle/
 *.aab
 *.keystore
 *.jks
+# IL2CPP build artifacts
+*-IL2CPP.symbols.zip
+build_BackUpThisFolder_ButDontShipItWithYourGame/
 # iOS / Xcode
 DerivedData/
 *.xcworkspace/
