@@ -121,6 +121,7 @@ public class AprilTagPermissionsManager : MonoBehaviour
 #else
         HasAllPermissions = true;
         OnAllPermissionsGranted?.Invoke();
+        yield break;
 #endif
     }
 
