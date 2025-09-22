@@ -1,7 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
-using UnityEngine;
 using PassthroughCameraSamples;
+using UnityEngine;
 
 namespace AprilTag
 {
@@ -13,10 +13,12 @@ namespace AprilTag
     {
         [Header("Auto Setup")]
         [Tooltip("Automatically find and configure AprilTagController on Start")]
-        [SerializeField] private bool autoSetupOnStart = true;
-        
+        [SerializeField]
+        private bool autoSetupOnStart = true;
+
         [Tooltip("Log setup process")]
-        [SerializeField] private bool logSetup = true;
+        [SerializeField]
+        private bool logSetup = true;
 
         private void Start()
         {
@@ -33,7 +35,8 @@ namespace AprilTag
             var aprilTagController = FindFirstObjectByType<AprilTagController>();
             if (aprilTagController == null)
             {
-                if (logSetup) Debug.LogError("[AprilTagSetupHelper] No AprilTagController found in scene!");
+                if (logSetup)
+                    Debug.LogError("[AprilTagSetupHelper] No AprilTagController found in scene!");
                 return;
             }
 
@@ -41,22 +44,31 @@ namespace AprilTag
             var webCamTextureManager = FindFirstObjectByType<WebCamTextureManager>();
             if (webCamTextureManager == null)
             {
-                if (logSetup) Debug.LogError("[AprilTagSetupHelper] No WebCamTextureManager found in scene!");
+                if (logSetup)
+                    Debug.LogError("[AprilTagSetupHelper] No WebCamTextureManager found in scene!");
                 return;
             }
 
             // Set the webCamManager reference
-            var field = typeof(AprilTagController).GetField("webCamManager", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
+            var field = typeof(AprilTagController).GetField(
+                "webCamManager",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance
+            );
+
             if (field != null)
             {
                 field.SetValue(aprilTagController, webCamTextureManager);
-                if (logSetup) Debug.Log($"[AprilTagSetupHelper] Successfully connected AprilTagController to WebCamTextureManager: {webCamTextureManager.name}");
+                if (logSetup)
+                    Debug.Log(
+                        $"[AprilTagSetupHelper] Successfully connected AprilTagController to WebCamTextureManager: {webCamTextureManager.name}"
+                    );
             }
             else
             {
-                if (logSetup) Debug.LogError("[AprilTagSetupHelper] Could not access webCamManager field in AprilTagController");
+                if (logSetup)
+                    Debug.LogError(
+                        "[AprilTagSetupHelper] Could not access webCamManager field in AprilTagController"
+                    );
             }
         }
     }

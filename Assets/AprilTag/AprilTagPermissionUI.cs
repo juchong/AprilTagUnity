@@ -1,24 +1,40 @@
 // Assets/AprilTag/AprilTagPermissionUI.cs
 // UI component for displaying permission status and requesting permissions
 
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro;
 
 public class AprilTagPermissionUI : MonoBehaviour
 {
     [Header("UI References")]
-    [SerializeField] private GameObject permissionPanel;
-    [SerializeField] private TextMeshProUGUI statusText;
-    [SerializeField] private TextMeshProUGUI detailText;
-    [SerializeField] private Button requestPermissionsButton;
-    [SerializeField] private Button retryButton;
-    [SerializeField] private Button closeButton;
+    [SerializeField]
+    private GameObject permissionPanel;
+
+    [SerializeField]
+    private TextMeshProUGUI statusText;
+
+    [SerializeField]
+    private TextMeshProUGUI detailText;
+
+    [SerializeField]
+    private Button requestPermissionsButton;
+
+    [SerializeField]
+    private Button retryButton;
+
+    [SerializeField]
+    private Button closeButton;
 
     [Header("Settings")]
-    [SerializeField] private bool showPanelOnStart = true;
-    [SerializeField] private bool autoHideOnGranted = true;
-    [SerializeField] private float autoHideDelay = 3f;
+    [SerializeField]
+    private bool showPanelOnStart = true;
+
+    [SerializeField]
+    private bool autoHideOnGranted = true;
+
+    [SerializeField]
+    private float autoHideDelay = 3f;
 
     private AprilTagPermissionsManager permissionsManager;
 
@@ -35,10 +51,10 @@ public class AprilTagPermissionUI : MonoBehaviour
         // Setup button listeners
         if (requestPermissionsButton != null)
             requestPermissionsButton.onClick.AddListener(RequestPermissions);
-        
+
         if (retryButton != null)
             retryButton.onClick.AddListener(RequestPermissions);
-        
+
         if (closeButton != null)
             closeButton.onClick.AddListener(HidePanel);
 
@@ -70,7 +86,7 @@ public class AprilTagPermissionUI : MonoBehaviour
     private void OnAllPermissionsGranted()
     {
         UpdateUI();
-        
+
         if (autoHideOnGranted)
         {
             Invoke(nameof(HidePanel), autoHideDelay);
@@ -95,7 +111,8 @@ public class AprilTagPermissionUI : MonoBehaviour
 
     private void UpdateUI()
     {
-        if (permissionsManager == null) return;
+        if (permissionsManager == null)
+            return;
 
         bool hasAllPermissions = AprilTagPermissionsManager.HasAllPermissions;
         bool hasCameraPermissions = AprilTagPermissionsManager.HasCameraPermissions;
@@ -132,7 +149,7 @@ public class AprilTagPermissionUI : MonoBehaviour
             string details = "Permission Status:\n";
             details += $"Camera Access: {(hasCameraPermissions ? "✓" : "✗")}\n";
             details += $"Spatial Data: {(hasSpatialPermissions ? "✓" : "✗")}\n\n";
-            
+
             if (!hasAllPermissions)
             {
                 details += "AprilTag detection requires:\n";
@@ -150,7 +167,7 @@ public class AprilTagPermissionUI : MonoBehaviour
             {
                 details += "All required permissions are granted.\nAprilTag detection is ready!";
             }
-            
+
             detailText.text = details;
         }
 
@@ -159,7 +176,7 @@ public class AprilTagPermissionUI : MonoBehaviour
         {
             requestPermissionsButton.gameObject.SetActive(!hasAllPermissions);
         }
-        
+
         if (retryButton != null)
         {
             retryButton.gameObject.SetActive(!hasAllPermissions);

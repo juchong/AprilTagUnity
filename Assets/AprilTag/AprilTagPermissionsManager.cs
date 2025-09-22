@@ -12,24 +12,28 @@ using UnityEngine.Android;
 public class AprilTagPermissionsManager : MonoBehaviour
 {
     [Header("Permission Settings")]
-    [SerializeField] private bool requestPermissionsOnStart = true;
-    [SerializeField] private bool retryOnDenial = true;
-    [SerializeField] private float retryDelaySeconds = 2f;
-    
+    [SerializeField]
+    private bool requestPermissionsOnStart = true;
+
+    [SerializeField]
+    private bool retryOnDenial = true;
+
+    [SerializeField]
+    private float retryDelaySeconds = 2f;
 
     // Permission constants
-    public static readonly string[] RequiredPermissions = 
+    public static readonly string[] RequiredPermissions =
     {
-        "android.permission.CAMERA",                    // Required for WebCamTexture
-        "horizonos.permission.HEADSET_CAMERA",         // Required for Passthrough Camera API (Horizon OS v74+)
-        "com.oculus.permission.USE_SCENE"              // Required for spatial data access
+        "android.permission.CAMERA", // Required for WebCamTexture
+        "horizonos.permission.HEADSET_CAMERA", // Required for Passthrough Camera API (Horizon OS v74+)
+        "com.oculus.permission.USE_SCENE", // Required for spatial data access
     };
 
     // Permission state tracking
     public static bool HasAllPermissions { get; private set; } = false;
     public static bool HasCameraPermissions { get; private set; } = false;
     public static bool HasSpatialPermissions { get; private set; } = false;
-    
+
     // Events for permission state changes
     public static event Action OnAllPermissionsGranted;
     public static event Action OnPermissionsDenied;
@@ -52,26 +56,27 @@ public class AprilTagPermissionsManager : MonoBehaviour
     /// </summary>
     public IEnumerator CheckAndRequestPermissions()
     {
-        if (_isCheckingPermissions) yield break;
-        
+        if (_isCheckingPermissions)
+            yield break;
+
         _isCheckingPermissions = true;
-        
+
         // Wait a frame to ensure everything is initialized
         yield return null;
-        
+
         // Check current permission state
         bool hasCamera = CheckCameraPermissions();
         bool hasSpatial = CheckSpatialPermissions();
-        
+
         HasCameraPermissions = hasCamera;
         HasSpatialPermissions = hasSpatial;
         HasAllPermissions = hasCamera && hasSpatial;
-        
+
         if (HasAllPermissions)
         {
             // Fix WebCamTextureManager permission state
             FixWebCamTextureManagerPermissionState();
-            
+
             OnAllPermissionsGranted?.Invoke();
         }
         else
@@ -81,7 +86,7 @@ public class AprilTagPermissionsManager : MonoBehaviour
                 yield return StartCoroutine(RequestMissingPermissions());
             }
         }
-        
+
         _isCheckingPermissions = false;
     }
 
@@ -92,30 +97,30 @@ public class AprilTagPermissionsManager : MonoBehaviour
     {
 #if UNITY_ANDROID
         _hasRequestedPermissions = true;
-        
+
         var missingPermissions = GetMissingPermissions();
         if (missingPermissions.Length == 0)
         {
             yield break;
         }
-        
+
         var callbacks = new PermissionCallbacks();
         callbacks.PermissionGranted += OnPermissionGrantedCallback;
         callbacks.PermissionDenied += OnPermissionDeniedCallback;
-        
+
         // Request all missing permissions at once
         Permission.RequestUserPermissions(missingPermissions, callbacks);
-        
+
         // Wait for permission response
         float timeout = 10f;
         float elapsed = 0f;
-        
+
         while (elapsed < timeout && !HasAllPermissions)
         {
             yield return new WaitForSeconds(0.1f);
             elapsed += 0.1f;
         }
-        
+
         // Final check
         yield return StartCoroutine(CheckAndRequestPermissions());
 #else
@@ -132,9 +137,12 @@ public class AprilTagPermissionsManager : MonoBehaviour
     private void OnPermissionGrantedCallback(string permission)
     {
         OnPermissionGranted?.Invoke(permission);
-        
+
         // Update individual permission states
-        if (permission == "android.permission.CAMERA" || permission == "horizonos.permission.HEADSET_CAMERA")
+        if (
+            permission == "android.permission.CAMERA"
+            || permission == "horizonos.permission.HEADSET_CAMERA"
+        )
         {
             HasCameraPermissions = CheckCameraPermissions();
         }
@@ -142,16 +150,16 @@ public class AprilTagPermissionsManager : MonoBehaviour
         {
             HasSpatialPermissions = CheckSpatialPermissions();
         }
-        
+
         // Check if all permissions are now granted
         bool wasComplete = HasAllPermissions;
         HasAllPermissions = HasCameraPermissions && HasSpatialPermissions;
-        
+
         if (HasAllPermissions && !wasComplete)
         {
             // Fix WebCamTextureManager permission state
             FixWebCamTextureManagerPermissionState();
-            
+
             OnAllPermissionsGranted?.Invoke();
         }
     }
@@ -162,7 +170,7 @@ public class AprilTagPermissionsManager : MonoBehaviour
     private void OnPermissionDeniedCallback(string permission)
     {
         OnPermissionDenied?.Invoke(permission);
-        
+
         // Check if we can ask again
         if (Permission.ShouldShowRequestPermissionRationale(permission))
         {
@@ -195,7 +203,9 @@ public class AprilTagPermissionsManager : MonoBehaviour
     {
 #if UNITY_ANDROID
         bool hasAndroidCamera = Permission.HasUserAuthorizedPermission("android.permission.CAMERA");
-        bool hasHeadsetsCamera = Permission.HasUserAuthorizedPermission("horizonos.permission.HEADSET_CAMERA");
+        bool hasHeadsetsCamera = Permission.HasUserAuthorizedPermission(
+            "horizonos.permission.HEADSET_CAMERA"
+        );
         return hasAndroidCamera && hasHeadsetsCamera;
 #else
         // In editor, always return true for testing
@@ -224,7 +234,7 @@ public class AprilTagPermissionsManager : MonoBehaviour
     {
 #if UNITY_ANDROID
         var missing = new System.Collections.Generic.List<string>();
-        
+
         foreach (string permission in RequiredPermissions)
         {
             if (!Permission.HasUserAuthorizedPermission(permission))
@@ -232,7 +242,7 @@ public class AprilTagPermissionsManager : MonoBehaviour
                 missing.Add(permission);
             }
         }
-        
+
         return missing.ToArray();
 #else
         return new string[0];
@@ -255,17 +265,17 @@ public class AprilTagPermissionsManager : MonoBehaviour
     {
         bool hasCamera = CheckCameraPermissions();
         bool hasSpatial = CheckSpatialPermissions();
-        
+
         bool wasComplete = HasAllPermissions;
         HasCameraPermissions = hasCamera;
         HasSpatialPermissions = hasSpatial;
         HasAllPermissions = hasCamera && hasSpatial;
-        
+
         if (HasAllPermissions && !wasComplete)
         {
             // Fix WebCamTextureManager permission state
             FixWebCamTextureManagerPermissionState();
-            
+
             OnAllPermissionsGranted?.Invoke();
         }
     }
@@ -276,24 +286,31 @@ public class AprilTagPermissionsManager : MonoBehaviour
     private void FixWebCamTextureManagerPermissionState()
     {
         var webCamManager = FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
-        if (webCamManager == null) return;
+        if (webCamManager == null)
+            return;
 
         var managerType = typeof(PassthroughCameraSamples.WebCamTextureManager);
-        var hasPermissionField = managerType.GetField("m_hasPermission", BindingFlags.NonPublic | BindingFlags.Instance);
-        
+        var hasPermissionField = managerType.GetField(
+            "m_hasPermission",
+            BindingFlags.NonPublic | BindingFlags.Instance
+        );
+
         if (hasPermissionField != null)
         {
             var currentState = hasPermissionField.GetValue(webCamManager);
             if (!(bool)currentState)
             {
                 hasPermissionField.SetValue(webCamManager, true);
-                
+
                 // Force reinitialize WebCamTextureManager
                 webCamManager.enabled = false;
                 webCamManager.enabled = true;
-                
+
                 // Manually trigger initialization
-                var initMethod = managerType.GetMethod("InitializeWebCamTexture", BindingFlags.NonPublic | BindingFlags.Instance);
+                var initMethod = managerType.GetMethod(
+                    "InitializeWebCamTexture",
+                    BindingFlags.NonPublic | BindingFlags.Instance
+                );
                 if (initMethod != null)
                 {
                     StartCoroutine((IEnumerator)initMethod.Invoke(webCamManager, null));
@@ -311,7 +328,7 @@ public class AprilTagPermissionsManager : MonoBehaviour
         status += $"  All Permissions: {HasAllPermissions}\n";
         status += $"  Camera Permissions: {HasCameraPermissions}\n";
         status += $"  Spatial Permissions: {HasSpatialPermissions}\n";
-        
+
 #if UNITY_ANDROID
         status += "  Individual Permissions:\n";
         foreach (string permission in RequiredPermissions)
@@ -320,10 +337,8 @@ public class AprilTagPermissionsManager : MonoBehaviour
             status += $"    {permission}: {granted}\n";
         }
 #endif
-        
         return status;
     }
-
 
     void OnDestroy()
     {

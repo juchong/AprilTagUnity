@@ -45,28 +45,34 @@ namespace AprilTag
 #if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
             // Find all EventSystems in the scene
             EventSystem[] eventSystems = FindObjectsByType<EventSystem>(FindObjectsSortMode.None);
-            
+
             foreach (EventSystem eventSystem in eventSystems)
             {
                 // Check if it has a StandaloneInputModule
-                StandaloneInputModule legacyInputModule = eventSystem.GetComponent<StandaloneInputModule>();
+                StandaloneInputModule legacyInputModule =
+                    eventSystem.GetComponent<StandaloneInputModule>();
                 if (legacyInputModule != null)
                 {
-                    Debug.Log($"[InputSystemFixer] Replacing StandaloneInputModule with InputSystemUIInputModule on {eventSystem.name}");
-                    
+                    Debug.Log(
+                        $"[InputSystemFixer] Replacing StandaloneInputModule with InputSystemUIInputModule on {eventSystem.name}"
+                    );
+
                     // Remove the legacy input module
                     DestroyImmediate(legacyInputModule);
-                    
+
                     // Add the new input system UI input module
                     eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
                 }
                 else
                 {
                     // Check if it already has InputSystemUIInputModule
-                    InputSystemUIInputModule inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
+                    InputSystemUIInputModule inputSystemModule =
+                        eventSystem.GetComponent<InputSystemUIInputModule>();
                     if (inputSystemModule == null)
                     {
-                        Debug.Log($"[InputSystemFixer] Adding InputSystemUIInputModule to {eventSystem.name}");
+                        Debug.Log(
+                            $"[InputSystemFixer] Adding InputSystemUIInputModule to {eventSystem.name}"
+                        );
                         eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
                     }
                 }
@@ -81,13 +87,16 @@ namespace AprilTag
         {
 #if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
             EventSystem[] eventSystems = FindObjectsByType<EventSystem>(FindObjectsSortMode.None);
-            
+
             foreach (EventSystem eventSystem in eventSystems)
             {
-                StandaloneInputModule legacyInputModule = eventSystem.GetComponent<StandaloneInputModule>();
+                StandaloneInputModule legacyInputModule =
+                    eventSystem.GetComponent<StandaloneInputModule>();
                 if (legacyInputModule != null)
                 {
-                    Debug.Log($"[InputSystemFixer] Replacing StandaloneInputModule with InputSystemUIInputModule on {eventSystem.name}");
+                    Debug.Log(
+                        $"[InputSystemFixer] Replacing StandaloneInputModule with InputSystemUIInputModule on {eventSystem.name}"
+                    );
                     DestroyImmediate(legacyInputModule);
                     eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
                 }

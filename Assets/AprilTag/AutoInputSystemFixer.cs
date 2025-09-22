@@ -12,10 +12,12 @@ namespace AprilTag
     {
         [Header("Auto Input System Fixer")]
         [Tooltip("Automatically fixes EventSystem input modules to work with Input System package")]
-        [SerializeField] private bool autoFixOnStart = true;
-        
+        [SerializeField]
+        private bool autoFixOnStart = true;
+
         [Tooltip("Fix EventSystems every frame (useful for dynamically created EventSystems)")]
-        [SerializeField] private bool fixEveryFrame = false;
+        [SerializeField]
+        private bool fixEveryFrame = false;
 
         private void Start()
         {
