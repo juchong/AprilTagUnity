@@ -1734,7 +1734,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1140149731
 Transform:
   m_ObjectHideFlags: 0
@@ -1773,6 +1773,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 1620922654972176, guid: ddb963bcde7d8a04a88b3ee4709f46c7, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 114372397652771654, guid: ddb963bcde7d8a04a88b3ee4709f46c7, type: 3}
       propertyPath: m_PresetInfoIsWorld
       value: 1
@@ -2418,13 +2422,14 @@ Material:
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
-  - _ALPHABLEND_ON
+  - _ALPHAPREMULTIPLY_ON
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: 3000
-  stringTagMap: {}
+  stringTagMap:
+    RenderType: Transparent
   disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
@@ -2481,7 +2486,7 @@ Material:
     - _Parallax: 0.02
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
-    - _SrcBlend: 5
+    - _SrcBlend: 1
     - _UVSec: 0
     - _ZWrite: 0
     m_Colors:
@@ -2738,7 +2743,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1812373137
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2878,7 +2883,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1869043739
 Transform:
   m_ObjectHideFlags: 0
@@ -2912,7 +2917,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1929519969
 Transform:
   m_ObjectHideFlags: 0
@@ -2940,71 +2945,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b17d334f407b9a64ca1356c48c06185f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  setupOnAwake: 1
-  createPermissionsManager: 1
-  createPermissionUI: 1
-  createAprilTagController: 1
-  createWebCamManager: 1
-  connectToWebCamManager: 1
-  createEnvironmentRaycastManager: 1
-  setupQuestSpecificFeatures: 1
-  requestPermissionsOnStart: 1
-  retryOnDenial: 1
-  retryDelaySeconds: 2
-  showPanelOnStart: 1
-  autoHideOnGranted: 1
-  autoHideDelay: 3
-  tagFamily: 1
-  tagSizeMeters: 0.165
-  decimate: 2
-  maxDetectionsPerSecond: 72
-  horizontalFovDeg: 78
-  scaleVizToTagSize: 1
-  tagVizPrefab: {fileID: 0}
-  createSimpleTagViz: 1
-  referenceCamera: {fileID: 463475071}
-  positionOffset: {x: -0.04, y: 0.02, z: 0}
-  rotationOffset: {x: 0, y: 0, z: 0}
-  enablePositionOffset: 1
-  enableRotationOffset: 1
-  useCenterEyeTransform: 1
-  cameraHeightOffset: 0
-  enableIPDCompensation: 1
-  cornerPositionOffset: {x: 0, y: 0, z: 0}
-  enableConfigurationTool: 0
-  enableAllDebugLogging: 1
-  usePassthroughRaycasting: 1
-  ignoreOcclusion: 1
-  positionScaleFactor: 1
-  minDetectionDistance: 0.3
-  maxDetectionDistance: 20
-  enableDistanceScaling: 1
-  enableQuestDebugging: 1
-  useUserRuntimeOffset: 1
-  userRuntimeOffset: {x: 0, y: 0, z: 0}
-  applyUserOffsetOnSetup: 1
-  saveUserOffsetToPersistence: 1
-  enableRuntimeCleanup: 1
-  cameraEye: 0
-  requestedResolution: {x: 0, y: 0}
-  enablePassthroughRaycasting: 1
-  autoFindEnvironmentRaycastManager: 1
-  environmentRaycastManager: {fileID: 720625301}
-  createSimpleEnvironmentRaycastManager: 1
-  setupCenterEyeAnchor: 1
-  centerEyeAnchor: {fileID: 463475069}
-  createSpatialAnchorManager: 1
-  enableSpatialAnchors: 1
-  anchorConfidenceThreshold: 0.3
-  requiredStableFrames: 2
-  maxDetectionTimeout: 10
-  persistAnchors: 1
-  enableClearAnchorsInput: 1
-  anchorPrefab: {fileID: 0}
-  enableKeepOutZone: 1
-  keepOutZoneMultiplier: 0.3
-  minKeepOutRadius: 0.02
-  maxKeepOutRadius: 0.1
 --- !u!1 &1952810829
 GameObject:
   m_ObjectHideFlags: 0
