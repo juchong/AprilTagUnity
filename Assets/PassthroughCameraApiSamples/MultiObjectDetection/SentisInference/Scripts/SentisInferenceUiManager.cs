@@ -2,7 +2,7 @@
 
 using System.Collections.Generic;
 using Meta.XR.Samples;
-using Unity.Sentis;
+
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -77,7 +77,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             m_detectionCanvas.CapturePosition();
         }
 
-        public void DrawUIBoxes(Tensor<float> output, Tensor<int> labelIDs, float imageWidth, float imageHeight)
+        public void DrawUIBoxes(Unity.InferenceEngine.Tensor<float> output, Unity.InferenceEngine.Tensor<int> labelIDs, float imageWidth, float imageHeight)
         {
             // Updte canvas position
             m_detectionCanvas.UpdatePosition();

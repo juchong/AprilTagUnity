@@ -3,7 +3,8 @@
 using System;
 using System.Collections;
 using Meta.XR.Samples;
-using Unity.Sentis;
+
+
 using UnityEngine;
 
 namespace PassthroughCameraSamples.MultiObjectDetection
@@ -13,8 +14,8 @@ namespace PassthroughCameraSamples.MultiObjectDetection
     {
         [Header("Sentis Model config")]
         [SerializeField] private Vector2Int m_inputSize = new(640, 640);
-        [SerializeField] private BackendType m_backend = BackendType.CPU;
-        [SerializeField] private ModelAsset m_sentisModel;
+        [SerializeField] private Unity.InferenceEngine.BackendType m_backend = Unity.InferenceEngine.BackendType.CPU;
+        [SerializeField] private Unity.InferenceEngine.ModelAsset m_sentisModel;
         [SerializeField] private int m_layersPerFrame = 25;
         [SerializeField] private TextAsset m_labelsAsset;
         public bool IsModelLoaded { get; private set; } = false;
@@ -23,21 +24,21 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         [SerializeField] private SentisInferenceUiManager m_uiInference;
 
         [Header("[Editor Only] Convert to Sentis")]
-        public ModelAsset OnnxModel;
+        public Unity.InferenceEngine.ModelAsset OnnxModel;
         [SerializeField, Range(0, 1)] private float m_iouThreshold = 0.6f;
         [SerializeField, Range(0, 1)] private float m_scoreThreshold = 0.23f;
         [Space(40)]
 
-        private Worker m_engine;
+        private Unity.InferenceEngine.Worker m_engine;
         private IEnumerator m_schedule;
         private bool m_started = false;
-        private Tensor<float> m_input;
-        private Model m_model;
+        private Unity.InferenceEngine.Tensor<float> m_input;
+        private Unity.InferenceEngine.Model m_model;
         private int m_download_state = 0;
-        private Tensor<float> m_output;
-        private Tensor<int> m_labelIDs;
-        private Tensor<float> m_pullOutput;
-        private Tensor<int> m_pullLabelIDs;
+        private Unity.InferenceEngine.Tensor<float> m_output;
+        private Unity.InferenceEngine.Tensor<int> m_labelIDs;
+        private Unity.InferenceEngine.Tensor<float> m_pullOutput;
+        private Unity.InferenceEngine.Tensor<int> m_pullLabelIDs;
         private bool m_isWaiting = false;
 
         #region Unity Functions
@@ -83,10 +84,10 @@ namespace PassthroughCameraSamples.MultiObjectDetection
                 m_uiInference.SetDetectionCapture(targetTexture);
                 // Convert the texture to a Tensor and schedule the inference
                 // Pre-allocate tensor with the correct shape [1, channels, height, width]
-                m_input = new Tensor<float>(new TensorShape(1, 3, m_inputSize.y, m_inputSize.x));
+                m_input = new Unity.InferenceEngine.Tensor<float>(new Unity.InferenceEngine.TensorShape(1, 3, m_inputSize.y, m_inputSize.x));
                 // Create texture transform for resizing
-                var transform = new TextureTransform().SetDimensions(m_inputSize.x, m_inputSize.y, 3);
-                TextureConverter.ToTensor(targetTexture, m_input, transform);
+                var transform = new Unity.InferenceEngine.TextureTransform();
+                Unity.InferenceEngine.TextureConverter.ToTensor(targetTexture, m_input, transform);
                 m_schedule = m_engine.ScheduleIterable(m_input);
                 m_download_state = 0;
                 m_started = true;
@@ -103,15 +104,15 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         private void LoadModel()
         {
             //Load model
-            var model = ModelLoader.Load(m_sentisModel);
+            var model = Unity.InferenceEngine.ModelLoader.Load(m_sentisModel);
             Debug.Log($"Sentis model loaded correctly with iouThreshold: {m_iouThreshold} and scoreThreshold: {m_scoreThreshold}");
             //Create engine to run model
-            m_engine = new Worker(model, m_backend);
+            m_engine = new Unity.InferenceEngine.Worker(model, m_backend);
             //Run a inference with an empty input to load the model in the memory and not pause the main thread.
             var emptyTexture = new Texture2D(m_inputSize.x, m_inputSize.y);
-            var input = new Tensor<float>(new TensorShape(1, 3, m_inputSize.y, m_inputSize.x));
-            var transform = new TextureTransform();
-            TextureConverter.ToTensor(emptyTexture, input, transform);
+            var input = new Unity.InferenceEngine.Tensor<float>(new Unity.InferenceEngine.TensorShape(1, 3, m_inputSize.y, m_inputSize.x));
+            var transform = new Unity.InferenceEngine.TextureTransform();
+            Unity.InferenceEngine.TextureConverter.ToTensor(emptyTexture, input, transform);
             m_engine.Schedule(input);
             IsModelLoaded = true;
         }
@@ -149,7 +150,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         private void PollRequestOuput()
         {
             // Get the output 0 (coordinates data) from the model output using Sentis pull request.
-            m_pullOutput = m_engine.PeekOutput(0) as Tensor<float>;
+            m_pullOutput = m_engine.PeekOutput(0) as Unity.InferenceEngine.Tensor<float>;
             if (m_pullOutput.dataOnBackend != null)
             {
                 m_pullOutput.ReadbackRequest();
@@ -165,7 +166,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         private void PollRequestLabelIDs()
         {
             // Get the output 1 (labels ID data) from the model output using Sentis pull request.
-            m_pullLabelIDs = m_engine.PeekOutput(1) as Tensor<int>;
+            m_pullLabelIDs = m_engine.PeekOutput(1) as Unity.InferenceEngine.Tensor<int>;
             if (m_pullLabelIDs.dataOnBackend != null)
             {
                 m_pullLabelIDs.ReadbackRequest();
