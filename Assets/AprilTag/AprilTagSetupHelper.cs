@@ -14,15 +14,15 @@ namespace AprilTag
         [Header("Auto Setup")]
         [Tooltip("Automatically find and configure AprilTagController on Start")]
         [SerializeField]
-        private bool autoSetupOnStart = true;
+        private bool m_autoSetupOnStart = true;
 
         [Tooltip("Log setup process")]
         [SerializeField]
-        private bool logSetup = true;
+        private bool m_logSetup = true;
 
         private void Start()
         {
-            if (autoSetupOnStart)
+            if (m_autoSetupOnStart)
             {
                 SetupAprilTagController();
             }
@@ -35,7 +35,7 @@ namespace AprilTag
             var aprilTagController = FindFirstObjectByType<AprilTagController>();
             if (aprilTagController == null)
             {
-                if (logSetup)
+                if (m_logSetup)
                     Debug.LogError("[AprilTagSetupHelper] No AprilTagController found in scene!");
                 return;
             }
@@ -44,7 +44,7 @@ namespace AprilTag
             var webCamTextureManager = FindFirstObjectByType<WebCamTextureManager>();
             if (webCamTextureManager == null)
             {
-                if (logSetup)
+                if (m_logSetup)
                     Debug.LogError("[AprilTagSetupHelper] No WebCamTextureManager found in scene!");
                 return;
             }
@@ -58,14 +58,14 @@ namespace AprilTag
             if (field != null)
             {
                 field.SetValue(aprilTagController, webCamTextureManager);
-                if (logSetup)
+                if (m_logSetup)
                     Debug.Log(
                         $"[AprilTagSetupHelper] Successfully connected AprilTagController to WebCamTextureManager: {webCamTextureManager.name}"
                     );
             }
             else
             {
-                if (logSetup)
+                if (m_logSetup)
                     Debug.LogError(
                         "[AprilTagSetupHelper] Could not access webCamManager field in AprilTagController"
                     );

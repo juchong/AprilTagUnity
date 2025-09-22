@@ -2,7 +2,6 @@
 
 using System.Collections.Generic;
 using Meta.XR.Samples;
-
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -13,18 +12,35 @@ namespace PassthroughCameraSamples.MultiObjectDetection
     public class SentisInferenceUiManager : MonoBehaviour
     {
         [Header("Placement configureation")]
-        [SerializeField] private EnvironmentRayCastSampleManager m_environmentRaycast;
-        [SerializeField] private WebCamTextureManager m_webCamTextureManager;
+        [SerializeField]
+        private EnvironmentRayCastSampleManager m_environmentRaycast;
+
+        [SerializeField]
+        private WebCamTextureManager m_webCamTextureManager;
         private PassthroughCameraEye CameraEye => m_webCamTextureManager.Eye;
 
         [Header("UI display references")]
-        [SerializeField] private SentisObjectDetectedUiManager m_detectionCanvas;
-        [SerializeField] private RawImage m_displayImage;
-        [SerializeField] private Sprite m_boxTexture;
-        [SerializeField] private Color m_boxColor;
-        [SerializeField] private Font m_font;
-        [SerializeField] private Color m_fontColor;
-        [SerializeField] private int m_fontSize = 80;
+        [SerializeField]
+        private SentisObjectDetectedUiManager m_detectionCanvas;
+
+        [SerializeField]
+        private RawImage m_displayImage;
+
+        [SerializeField]
+        private Sprite m_boxTexture;
+
+        [SerializeField]
+        private Color m_boxColor;
+
+        [SerializeField]
+        private Font m_font;
+
+        [SerializeField]
+        private Color m_fontColor;
+
+        [SerializeField]
+        private int m_fontSize = 80;
+
         [Space(10)]
         public UnityEvent<int> OnObjectsDetected;
 
@@ -77,7 +93,12 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             m_detectionCanvas.CapturePosition();
         }
 
-        public void DrawUIBoxes(Unity.InferenceEngine.Tensor<float> output, Unity.InferenceEngine.Tensor<int> labelIDs, float imageWidth, float imageHeight)
+        public void DrawUIBoxes(
+            Unity.InferenceEngine.Tensor<float> output,
+            Unity.InferenceEngine.Tensor<int> labelIDs,
+            float imageWidth,
+            float imageHeight
+        )
         {
             // Updte canvas position
             m_detectionCanvas.UpdatePosition();
@@ -121,7 +142,10 @@ namespace PassthroughCameraSamples.MultiObjectDetection
                 var classname = m_labels[labelIDs[n]].Replace(" ", "_");
 
                 // Get the 3D marker world position using Depth Raycast
-                var centerPixel = new Vector2Int(Mathf.RoundToInt(perX * camRes.x), Mathf.RoundToInt((1.0f - perY) * camRes.y));
+                var centerPixel = new Vector2Int(
+                    Mathf.RoundToInt(perX * camRes.x),
+                    Mathf.RoundToInt((1.0f - perY) * camRes.y)
+                );
                 var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(CameraEye, centerPixel);
                 var worldPos = m_environmentRaycast.PlaceGameObjectByScreenPos(ray);
 
@@ -133,7 +157,8 @@ namespace PassthroughCameraSamples.MultiObjectDetection
                     ClassName = classname,
                     Width = output[n, 2] * scaleX,
                     Height = output[n, 3] * scaleY,
-                    Label = $"Id: {n} Class: {classname} Center (px): {(int)centerX},{(int)centerY} Center (%): {perX:0.00},{perY:0.00}",
+                    Label =
+                        $"Id: {n} Class: {classname} Center (px): {(int)centerX},{(int)centerY} Center (%): {perX:0.00},{perY:0.00}",
                     WorldPos = worldPos,
                 };
 
@@ -175,9 +200,15 @@ namespace PassthroughCameraSamples.MultiObjectDetection
                 panel = CreateNewBox(m_boxColor);
             }
             //Set box position
-            panel.transform.localPosition = new Vector3(box.CenterX, -box.CenterY, box.WorldPos.HasValue ? box.WorldPos.Value.z : 0.0f);
+            panel.transform.localPosition = new Vector3(
+                box.CenterX,
+                -box.CenterY,
+                box.WorldPos.HasValue ? box.WorldPos.Value.z : 0.0f
+            );
             //Set box rotation
-            panel.transform.rotation = Quaternion.LookRotation(panel.transform.position - m_detectionCanvas.GetCapturedCameraPosition());
+            panel.transform.rotation = Quaternion.LookRotation(
+                panel.transform.position - m_detectionCanvas.GetCapturedCameraPosition()
+            );
             //Set box size
             var rt = panel.GetComponent<RectTransform>();
             rt.sizeDelta = new Vector2(box.Width, box.Height);

@@ -16,15 +16,15 @@ namespace AprilTag
     [DefaultExecutionOrder(-1000)] // Run early to fix EventSystems before they cause errors
     public class InputSystemFixer : MonoBehaviour
     {
-        private static bool _hasFixed = false;
+        private static bool s_hasFixed = false;
 
         private void Awake()
         {
             // Only fix once per application session
-            if (!_hasFixed)
+            if (!s_hasFixed)
             {
                 FixEventSystems();
-                _hasFixed = true;
+                s_hasFixed = true;
             }
         }
 
@@ -44,13 +44,12 @@ namespace AprilTag
         {
 #if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
             // Find all EventSystems in the scene
-            EventSystem[] eventSystems = FindObjectsByType<EventSystem>(FindObjectsSortMode.None);
+            var eventSystems = FindObjectsByType<EventSystem>(FindObjectsSortMode.None);
 
-            foreach (EventSystem eventSystem in eventSystems)
+            foreach (var eventSystem in eventSystems)
             {
                 // Check if it has a StandaloneInputModule
-                StandaloneInputModule legacyInputModule =
-                    eventSystem.GetComponent<StandaloneInputModule>();
+                var legacyInputModule = eventSystem.GetComponent<StandaloneInputModule>();
                 if (legacyInputModule != null)
                 {
                     Debug.Log(
@@ -66,8 +65,7 @@ namespace AprilTag
                 else
                 {
                     // Check if it already has InputSystemUIInputModule
-                    InputSystemUIInputModule inputSystemModule =
-                        eventSystem.GetComponent<InputSystemUIInputModule>();
+                    var inputSystemModule = eventSystem.GetComponent<InputSystemUIInputModule>();
                     if (inputSystemModule == null)
                     {
                         Debug.Log(
@@ -86,12 +84,11 @@ namespace AprilTag
         public static void FixAllEventSystems()
         {
 #if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
-            EventSystem[] eventSystems = FindObjectsByType<EventSystem>(FindObjectsSortMode.None);
+            var eventSystems = FindObjectsByType<EventSystem>(FindObjectsSortMode.None);
 
-            foreach (EventSystem eventSystem in eventSystems)
+            foreach (var eventSystem in eventSystems)
             {
-                StandaloneInputModule legacyInputModule =
-                    eventSystem.GetComponent<StandaloneInputModule>();
+                var legacyInputModule = eventSystem.GetComponent<StandaloneInputModule>();
                 if (legacyInputModule != null)
                 {
                     Debug.Log(

@@ -11,9 +11,14 @@ namespace PassthroughCameraSamples.ShaderSample
     public class ShaderSampleManager : MonoBehaviour
     {
         // Create a field to attach the reference to the webCamTextureManager prefab
-        [SerializeField] private WebCamTextureManager m_webCamTextureManager;
-        [SerializeField] private Text m_debugText;
-        [SerializeField] private MeshRenderer m_renderer;
+        [SerializeField]
+        private WebCamTextureManager m_webCamTextureManager;
+
+        [SerializeField]
+        private Text m_debugText;
+
+        [SerializeField]
+        private MeshRenderer m_renderer;
 
         private IEnumerator Start()
         {
@@ -26,6 +31,10 @@ namespace PassthroughCameraSamples.ShaderSample
             m_renderer.material.SetTexture("_MainTex", m_webCamTextureManager.WebCamTexture);
         }
 
-        private void Update() => m_debugText.text = PassthroughCameraPermissions.HasCameraPermission == true ? "Permission granted." : "No permission granted.";
+        private void Update() =>
+            m_debugText.text =
+                PassthroughCameraPermissions.HasCameraPermission == true
+                    ? "Permission granted."
+                    : "No permission granted.";
     }
 }

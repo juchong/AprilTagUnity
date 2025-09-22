@@ -3,8 +3,6 @@
 using System;
 using System.Collections;
 using Meta.XR.Samples;
-
-
 using UnityEngine;
 
 namespace PassthroughCameraSamples.MultiObjectDetection
@@ -13,22 +11,36 @@ namespace PassthroughCameraSamples.MultiObjectDetection
     public class SentisInferenceRunManager : MonoBehaviour
     {
         [Header("Sentis Model config")]
-        [SerializeField] private Vector2Int m_inputSize = new(640, 640);
-        [SerializeField] private Unity.InferenceEngine.BackendType m_backend = Unity.InferenceEngine.BackendType.CPU;
-        [SerializeField] private Unity.InferenceEngine.ModelAsset m_sentisModel;
-        [SerializeField] private int m_layersPerFrame = 25;
-        [SerializeField] private TextAsset m_labelsAsset;
+        [SerializeField]
+        private Vector2Int m_inputSize = new(640, 640);
+
+        [SerializeField]
+        private Unity.InferenceEngine.BackendType m_backend = Unity.InferenceEngine.BackendType.CPU;
+
+        [SerializeField]
+        private Unity.InferenceEngine.ModelAsset m_sentisModel;
+
+        [SerializeField]
+        private int m_layersPerFrame = 25;
+
+        [SerializeField]
+        private TextAsset m_labelsAsset;
         public bool IsModelLoaded { get; private set; } = false;
 
         [Header("UI display references")]
-        [SerializeField] private SentisInferenceUiManager m_uiInference;
+        [SerializeField]
+        private SentisInferenceUiManager m_uiInference;
 
         [Header("[Editor Only] Convert to Sentis")]
         public Unity.InferenceEngine.ModelAsset OnnxModel;
-        [SerializeField, Range(0, 1)] private float m_iouThreshold = 0.6f;
-        [SerializeField, Range(0, 1)] private float m_scoreThreshold = 0.23f;
-        [Space(40)]
 
+        [SerializeField, Range(0, 1)]
+        private float m_iouThreshold = 0.6f;
+
+        [SerializeField, Range(0, 1)]
+        private float m_scoreThreshold = 0.23f;
+
+        [Space(40)]
         private Unity.InferenceEngine.Worker m_engine;
         private IEnumerator m_schedule;
         private bool m_started = false;
@@ -84,7 +96,9 @@ namespace PassthroughCameraSamples.MultiObjectDetection
                 m_uiInference.SetDetectionCapture(targetTexture);
                 // Convert the texture to a Tensor and schedule the inference
                 // Pre-allocate tensor with the correct shape [1, channels, height, width]
-                m_input = new Unity.InferenceEngine.Tensor<float>(new Unity.InferenceEngine.TensorShape(1, 3, m_inputSize.y, m_inputSize.x));
+                m_input = new Unity.InferenceEngine.Tensor<float>(
+                    new Unity.InferenceEngine.TensorShape(1, 3, m_inputSize.y, m_inputSize.x)
+                );
                 // Create texture transform for resizing
                 var transform = new Unity.InferenceEngine.TextureTransform();
                 Unity.InferenceEngine.TextureConverter.ToTensor(targetTexture, m_input, transform);
@@ -105,12 +119,16 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         {
             //Load model
             var model = Unity.InferenceEngine.ModelLoader.Load(m_sentisModel);
-            Debug.Log($"Sentis model loaded correctly with iouThreshold: {m_iouThreshold} and scoreThreshold: {m_scoreThreshold}");
+            Debug.Log(
+                $"Sentis model loaded correctly with iouThreshold: {m_iouThreshold} and scoreThreshold: {m_scoreThreshold}"
+            );
             //Create engine to run model
             m_engine = new Unity.InferenceEngine.Worker(model, m_backend);
             //Run a inference with an empty input to load the model in the memory and not pause the main thread.
             var emptyTexture = new Texture2D(m_inputSize.x, m_inputSize.y);
-            var input = new Unity.InferenceEngine.Tensor<float>(new Unity.InferenceEngine.TensorShape(1, 3, m_inputSize.y, m_inputSize.x));
+            var input = new Unity.InferenceEngine.Tensor<float>(
+                new Unity.InferenceEngine.TensorShape(1, 3, m_inputSize.y, m_inputSize.x)
+            );
             var transform = new Unity.InferenceEngine.TextureTransform();
             Unity.InferenceEngine.TextureConverter.ToTensor(emptyTexture, input, transform);
             m_engine.Schedule(input);

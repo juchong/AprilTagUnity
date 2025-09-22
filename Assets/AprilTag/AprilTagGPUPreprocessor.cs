@@ -1,6 +1,5 @@
 using System;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 namespace AprilTag
 {
@@ -10,106 +9,106 @@ namespace AprilTag
     /// </summary>
     public class AprilTagGPUPreprocessor : IDisposable
     {
-        [System.Serializable]
+        [Serializable]
         public class PreprocessingSettings
         {
             [Header("Adaptive Threshold")]
             [Tooltip("Enable adaptive thresholding for better detection in varying lighting")]
-            public bool enableAdaptiveThreshold = false; // Start disabled - binary output can be too aggressive
+            public bool EnableAdaptiveThreshold = false; // Start disabled - binary output can be too aggressive
 
             [Range(3, 21)]
             [Tooltip("Block size for adaptive threshold (must be odd)")]
-            public int adaptiveBlockSize = 11;
+            public int AdaptiveBlockSize = 11;
 
             [Range(-10f, 10f)]
             [Tooltip("Constant subtracted from weighted mean")]
-            public float adaptiveConstant = 2f;
+            public float AdaptiveConstant = 2f;
 
             [Header("Histogram Equalization")]
             [Tooltip("Enable histogram equalization for contrast enhancement")]
-            public bool enableHistogramEqualization = true; // Working feature - enabled
+            public bool EnableHistogramEqualization = true; // Working feature - enabled
 
             [Range(0f, 1f)]
             [Tooltip("Strength of histogram equalization (0 = none, 1 = full)")]
-            public float histogramStrength = 0.7f; // Increased for better effect
+            public float HistogramStrength = 0.7f; // Increased for better effect
 
             [Header("Noise Reduction")]
             [Tooltip("Enable Gaussian blur for noise reduction")]
-            public bool enableNoiseReduction = true; // Working feature - enabled
+            public bool EnableNoiseReduction = true; // Working feature - enabled
 
             [Range(1, 5)]
             [Tooltip("Gaussian blur kernel radius")]
-            public int blurRadius = 2; // Increased for better effect
+            public int BlurRadius = 2; // Increased for better effect
 
             [Range(0.5f, 3f)]
             [Tooltip("Gaussian sigma value")]
-            public float blurSigma = 1.0f; // Increased for better effect
+            public float BlurSigma = 1.0f; // Increased for better effect
 
             [Header("Edge Enhancement")]
             [Tooltip("Enable edge enhancement for sharper tag borders")]
-            public bool enableEdgeEnhancement = false; // Problematic feature - disabled
+            public bool EnableEdgeEnhancement = false; // Problematic feature - disabled
 
             [Range(0f, 2f)]
             [Tooltip("Edge enhancement strength")]
-            public float edgeStrength = 0.3f; // Reduced default
+            public float EdgeStrength = 0.3f; // Reduced default
 
             [Header("Performance")]
             [Tooltip("Use half precision (16-bit) for better performance")]
-            public bool useHalfPrecision = true;
+            public bool UseHalfPrecision = true;
 
             [Tooltip("Process at reduced resolution for performance")]
-            public bool enableDownsampling = false;
+            public bool EnableDownsampling = false;
 
             [Range(0.25f, 1f)]
             [Tooltip("Downsampling factor (1 = full resolution)")]
-            public float downsampleFactor = 0.5f;
+            public float DownsampleFactor = 0.5f;
         }
 
         // Compute shaders
-        private ComputeShader _preprocessorShader;
-        private ComputeShader _histogramShader;
+        private ComputeShader m_preprocessorShader;
+        private ComputeShader m_histogramShader;
 
         // Shader kernels
-        private int _grayscaleKernel;
-        private int _adaptiveThresholdKernel;
-        private int _gaussianBlurKernel;
-        private int _edgeEnhanceKernel;
-        private int _histogramKernel;
-        private int _histogramApplyKernel;
-        private int _grayscaleToRGBAKernel;
+        private int m_grayscaleKernel;
+        private int m_adaptiveThresholdKernel;
+        private int m_gaussianBlurKernel;
+        private int m_edgeEnhanceKernel;
+        private int m_histogramKernel;
+        private int m_histogramApplyKernel;
+        private int m_grayscaleToRGBAKernel;
 
         // Render textures for pipeline stages
-        private RenderTexture _sourceTexture;
-        private RenderTexture _grayscaleTexture;
-        private RenderTexture _processedTexture;
-        private RenderTexture _tempTexture;
-        private RenderTexture _finalRGBATexture;
+        private RenderTexture m_sourceTexture;
+        private RenderTexture m_grayscaleTexture;
+        private RenderTexture m_processedTexture;
+        private RenderTexture m_tempTexture;
+        private RenderTexture m_finalRGBATexture;
 
         // Histogram buffers
-        private ComputeBuffer _histogramBuffer;
-        private ComputeBuffer _cdfBuffer;
+        private ComputeBuffer m_histogramBuffer;
+        private ComputeBuffer m_cdfBuffer;
 
         // Gaussian kernel buffer
-        private ComputeBuffer _gaussianKernel;
+        private ComputeBuffer m_gaussianKernel;
 
         // Current settings
-        private PreprocessingSettings _settings;
-        private int _width;
-        private int _height;
+        private PreprocessingSettings m_settings;
+        private int m_width;
+        private int m_height;
 
         // Performance tracking
         private float _lastProcessingTime;
         private bool _isInitialized;
 
-        public PreprocessingSettings Settings => _settings;
+        public PreprocessingSettings Settings => m_settings;
         public float LastProcessingTimeMs => _lastProcessingTime;
         public bool IsInitialized => _isInitialized;
 
         public AprilTagGPUPreprocessor(int width, int height, PreprocessingSettings settings = null)
         {
-            _width = width;
-            _height = height;
-            _settings = settings ?? new PreprocessingSettings();
+            m_width = width;
+            m_height = height;
+            m_settings = settings ?? new PreprocessingSettings();
 
             Initialize();
         }
@@ -119,10 +118,10 @@ namespace AprilTag
             try
             {
                 // Load compute shaders
-                _preprocessorShader = Resources.Load<ComputeShader>("AprilTagPreprocessor");
-                _histogramShader = Resources.Load<ComputeShader>("AprilTagHistogram");
+                m_preprocessorShader = Resources.Load<ComputeShader>("AprilTagPreprocessor");
+                m_histogramShader = Resources.Load<ComputeShader>("AprilTagHistogram");
 
-                if (_preprocessorShader == null)
+                if (m_preprocessorShader == null)
                 {
                     Debug.LogError(
                         "[AprilTagGPUPreprocessor] Failed to load AprilTagPreprocessor compute shader! Make sure Assets/AprilTag/Resources/AprilTagPreprocessor.compute exists."
@@ -131,7 +130,7 @@ namespace AprilTag
                     return;
                 }
 
-                if (_histogramShader == null)
+                if (m_histogramShader == null)
                 {
                     Debug.LogError(
                         "[AprilTagGPUPreprocessor] Failed to load AprilTagHistogram compute shader! Make sure Assets/AprilTag/Resources/AprilTagHistogram.compute exists."
@@ -151,21 +150,21 @@ namespace AprilTag
                 }
 
                 // Get kernel indices
-                _grayscaleKernel = _preprocessorShader.FindKernel("CSGrayscale");
-                _adaptiveThresholdKernel = _preprocessorShader.FindKernel("CSAdaptiveThreshold");
-                _gaussianBlurKernel = _preprocessorShader.FindKernel("CSGaussianBlur");
-                _edgeEnhanceKernel = _preprocessorShader.FindKernel("CSEdgeEnhance");
-                _grayscaleToRGBAKernel = _preprocessorShader.FindKernel("CSGrayscaleToRGBA");
+                m_grayscaleKernel = m_preprocessorShader.FindKernel("CSGrayscale");
+                m_adaptiveThresholdKernel = m_preprocessorShader.FindKernel("CSAdaptiveThreshold");
+                m_gaussianBlurKernel = m_preprocessorShader.FindKernel("CSGaussianBlur");
+                m_edgeEnhanceKernel = m_preprocessorShader.FindKernel("CSEdgeEnhance");
+                m_grayscaleToRGBAKernel = m_preprocessorShader.FindKernel("CSGrayscaleToRGBA");
 
-                _histogramKernel = _histogramShader.FindKernel("CSCalculateHistogram");
-                _histogramApplyKernel = _histogramShader.FindKernel("CSApplyHistogram");
+                m_histogramKernel = m_histogramShader.FindKernel("CSCalculateHistogram");
+                m_histogramApplyKernel = m_histogramShader.FindKernel("CSApplyHistogram");
 
                 // Create render textures
                 CreateRenderTextures();
 
                 // Create compute buffers
-                _histogramBuffer = new ComputeBuffer(256, sizeof(uint));
-                _cdfBuffer = new ComputeBuffer(256, sizeof(float));
+                m_histogramBuffer = new ComputeBuffer(256, sizeof(uint));
+                m_cdfBuffer = new ComputeBuffer(256, sizeof(float));
 
                 // Initialize Gaussian kernel
                 UpdateGaussianKernel();
@@ -181,58 +180,58 @@ namespace AprilTag
 
         private void CreateRenderTextures()
         {
-            var format = _settings.useHalfPrecision
+            var format = m_settings.UseHalfPrecision
                 ? RenderTextureFormat.RHalf
                 : RenderTextureFormat.RFloat;
 
             // Calculate actual dimensions based on downsampling
-            int processWidth = _width;
-            int processHeight = _height;
+            int processWidth = m_width;
+            int processHeight = m_height;
 
-            if (_settings.enableDownsampling)
+            if (m_settings.EnableDownsampling)
             {
-                processWidth = Mathf.RoundToInt(_width * _settings.downsampleFactor);
-                processHeight = Mathf.RoundToInt(_height * _settings.downsampleFactor);
+                processWidth = Mathf.RoundToInt(m_width * m_settings.DownsampleFactor);
+                processHeight = Mathf.RoundToInt(m_height * m_settings.DownsampleFactor);
             }
 
             // Source texture (full resolution RGBA)
-            _sourceTexture = new RenderTexture(_width, _height, 0, RenderTextureFormat.ARGB32)
+            m_sourceTexture = new RenderTexture(m_width, m_height, 0, RenderTextureFormat.ARGB32)
             {
                 enableRandomWrite = true,
                 filterMode = FilterMode.Bilinear,
                 wrapMode = TextureWrapMode.Clamp,
             };
-            _sourceTexture.Create();
+            m_sourceTexture.Create();
 
             // Grayscale texture
-            _grayscaleTexture = new RenderTexture(processWidth, processHeight, 0, format)
+            m_grayscaleTexture = new RenderTexture(processWidth, processHeight, 0, format)
             {
                 enableRandomWrite = true,
                 filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Clamp,
             };
-            _grayscaleTexture.Create();
+            m_grayscaleTexture.Create();
 
             // Processed texture (final output)
-            _processedTexture = new RenderTexture(processWidth, processHeight, 0, format)
+            m_processedTexture = new RenderTexture(processWidth, processHeight, 0, format)
             {
                 enableRandomWrite = true,
                 filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Clamp,
             };
-            _processedTexture.Create();
+            m_processedTexture.Create();
 
             // Temp texture for multi-pass operations
-            _tempTexture = new RenderTexture(processWidth, processHeight, 0, format)
+            m_tempTexture = new RenderTexture(processWidth, processHeight, 0, format)
             {
                 enableRandomWrite = true,
                 filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Clamp,
             };
-            _tempTexture.Create();
+            m_tempTexture.Create();
 
             // Final RGBA texture for AprilTag detector
-            _finalRGBATexture = new RenderTexture(
+            m_finalRGBATexture = new RenderTexture(
                 processWidth,
                 processHeight,
                 0,
@@ -243,14 +242,14 @@ namespace AprilTag
                 filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Clamp,
             };
-            _finalRGBATexture.Create();
+            m_finalRGBATexture.Create();
         }
 
         private void UpdateGaussianKernel()
         {
-            int kernelSize = _settings.blurRadius * 2 + 1;
+            int kernelSize = m_settings.BlurRadius * 2 + 1;
             float[] kernel = new float[kernelSize * kernelSize];
-            float sigma = _settings.blurSigma;
+            float sigma = m_settings.BlurSigma;
             float sum = 0;
 
             // Generate Gaussian kernel
@@ -258,8 +257,8 @@ namespace AprilTag
             {
                 for (int x = 0; x < kernelSize; x++)
                 {
-                    int dx = x - _settings.blurRadius;
-                    int dy = y - _settings.blurRadius;
+                    int dx = x - m_settings.BlurRadius;
+                    int dy = y - m_settings.BlurRadius;
                     float value = Mathf.Exp(-(dx * dx + dy * dy) / (2f * sigma * sigma));
                     kernel[y * kernelSize + x] = value;
                     sum += value;
@@ -273,9 +272,9 @@ namespace AprilTag
             }
 
             // Update or create buffer
-            _gaussianKernel?.Release();
-            _gaussianKernel = new ComputeBuffer(kernel.Length, sizeof(float));
-            _gaussianKernel.SetData(kernel);
+            m_gaussianKernel?.Release();
+            m_gaussianKernel = new ComputeBuffer(kernel.Length, sizeof(float));
+            m_gaussianKernel.SetData(kernel);
         }
 
         /// <summary>
@@ -305,14 +304,14 @@ namespace AprilTag
             try
             {
                 // Copy source to GPU
-                Graphics.Blit(source, _sourceTexture);
+                Graphics.Blit(source, m_sourceTexture);
 
                 // Run preprocessing pipeline
                 ProcessPipeline();
 
                 _lastProcessingTime = (Time.realtimeSinceStartup - startTime) * 1000f;
 
-                return _finalRGBATexture;
+                return m_finalRGBATexture;
             }
             catch (Exception e)
             {
@@ -337,9 +336,9 @@ namespace AprilTag
             var startTime = Time.realtimeSinceStartup;
 
             // Copy source if needed
-            if (source != _sourceTexture)
+            if (source != m_sourceTexture)
             {
-                Graphics.Blit(source, _sourceTexture);
+                Graphics.Blit(source, m_sourceTexture);
             }
 
             // Run preprocessing pipeline
@@ -347,7 +346,7 @@ namespace AprilTag
 
             _lastProcessingTime = (Time.realtimeSinceStartup - startTime) * 1000f;
 
-            return _finalRGBATexture;
+            return m_finalRGBATexture;
         }
 
         private void ProcessPipeline()
@@ -356,25 +355,25 @@ namespace AprilTag
             ConvertToGrayscale();
 
             // Step 2: Noise reduction (if enabled)
-            if (_settings.enableNoiseReduction)
+            if (m_settings.EnableNoiseReduction)
             {
                 ApplyGaussianBlur();
             }
 
             // Step 3: Histogram equalization (if enabled)
-            if (_settings.enableHistogramEqualization)
+            if (m_settings.EnableHistogramEqualization)
             {
                 ApplyHistogramEqualization();
             }
 
             // Step 4: Edge enhancement (if enabled)
-            if (_settings.enableEdgeEnhancement)
+            if (m_settings.EnableEdgeEnhancement)
             {
                 ApplyEdgeEnhancement();
             }
 
             // Step 5: Adaptive threshold (if enabled)
-            if (_settings.enableAdaptiveThreshold)
+            if (m_settings.EnableAdaptiveThreshold)
             {
                 ApplyAdaptiveThreshold();
             }
@@ -385,98 +384,107 @@ namespace AprilTag
 
         private void ConvertToGrayscale()
         {
-            _preprocessorShader.SetTexture(_grayscaleKernel, "_SourceTex", _sourceTexture);
-            _preprocessorShader.SetTexture(_grayscaleKernel, "_ResultTex", _grayscaleTexture);
+            m_preprocessorShader.SetTexture(m_grayscaleKernel, "_SourceTex", m_sourceTexture);
+            m_preprocessorShader.SetTexture(m_grayscaleKernel, "_ResultTex", m_grayscaleTexture);
 
-            int threadGroupsX = Mathf.CeilToInt(_grayscaleTexture.width / 8f);
-            int threadGroupsY = Mathf.CeilToInt(_grayscaleTexture.height / 8f);
+            int threadGroupsX = Mathf.CeilToInt(m_grayscaleTexture.width / 8f);
+            int threadGroupsY = Mathf.CeilToInt(m_grayscaleTexture.height / 8f);
 
-            _preprocessorShader.Dispatch(_grayscaleKernel, threadGroupsX, threadGroupsY, 1);
+            m_preprocessorShader.Dispatch(m_grayscaleKernel, threadGroupsX, threadGroupsY, 1);
         }
 
         private void ApplyGaussianBlur()
         {
-            _preprocessorShader.SetTexture(_gaussianBlurKernel, "_SourceTex", _grayscaleTexture);
-            _preprocessorShader.SetTexture(_gaussianBlurKernel, "_ResultTex", _tempTexture);
-            _preprocessorShader.SetBuffer(_gaussianBlurKernel, "_GaussianKernel", _gaussianKernel);
-            _preprocessorShader.SetInt("_KernelRadius", _settings.blurRadius);
+            m_preprocessorShader.SetTexture(m_gaussianBlurKernel, "_SourceTex", m_grayscaleTexture);
+            m_preprocessorShader.SetTexture(m_gaussianBlurKernel, "_ResultTex", m_tempTexture);
+            m_preprocessorShader.SetBuffer(
+                m_gaussianBlurKernel,
+                "_GaussianKernel",
+                m_gaussianKernel
+            );
+            m_preprocessorShader.SetInt("_KernelRadius", m_settings.BlurRadius);
 
-            int threadGroupsX = Mathf.CeilToInt(_grayscaleTexture.width / 8f);
-            int threadGroupsY = Mathf.CeilToInt(_grayscaleTexture.height / 8f);
+            int threadGroupsX = Mathf.CeilToInt(m_grayscaleTexture.width / 8f);
+            int threadGroupsY = Mathf.CeilToInt(m_grayscaleTexture.height / 8f);
 
-            _preprocessorShader.Dispatch(_gaussianBlurKernel, threadGroupsX, threadGroupsY, 1);
+            m_preprocessorShader.Dispatch(m_gaussianBlurKernel, threadGroupsX, threadGroupsY, 1);
 
             // Swap textures
-            SwapTextures(ref _grayscaleTexture, ref _tempTexture);
+            SwapTextures(ref m_grayscaleTexture, ref m_tempTexture);
         }
 
         private void ApplyHistogramEqualization()
         {
             // Clear histogram buffer
-            _histogramBuffer.SetData(new uint[256]);
+            m_histogramBuffer.SetData(new uint[256]);
 
             // Calculate histogram
-            _histogramShader.SetTexture(_histogramKernel, "_SourceTex", _grayscaleTexture);
-            _histogramShader.SetBuffer(_histogramKernel, "_Histogram", _histogramBuffer);
+            m_histogramShader.SetTexture(m_histogramKernel, "_SourceTex", m_grayscaleTexture);
+            m_histogramShader.SetBuffer(m_histogramKernel, "_Histogram", m_histogramBuffer);
 
-            int threadGroupsX = Mathf.CeilToInt(_grayscaleTexture.width / 32f);
-            int threadGroupsY = Mathf.CeilToInt(_grayscaleTexture.height / 32f);
+            int threadGroupsX = Mathf.CeilToInt(m_grayscaleTexture.width / 32f);
+            int threadGroupsY = Mathf.CeilToInt(m_grayscaleTexture.height / 32f);
 
-            _histogramShader.Dispatch(_histogramKernel, threadGroupsX, threadGroupsY, 1);
+            m_histogramShader.Dispatch(m_histogramKernel, threadGroupsX, threadGroupsY, 1);
 
             // Apply histogram equalization
-            _histogramShader.SetTexture(_histogramApplyKernel, "_SourceTex", _grayscaleTexture);
-            _histogramShader.SetTexture(_histogramApplyKernel, "_ResultTex", _tempTexture);
-            _histogramShader.SetBuffer(_histogramApplyKernel, "_Histogram", _histogramBuffer);
-            _histogramShader.SetFloat("_Strength", _settings.histogramStrength);
-            _histogramShader.SetInt(
+            m_histogramShader.SetTexture(m_histogramApplyKernel, "_SourceTex", m_grayscaleTexture);
+            m_histogramShader.SetTexture(m_histogramApplyKernel, "_ResultTex", m_tempTexture);
+            m_histogramShader.SetBuffer(m_histogramApplyKernel, "_Histogram", m_histogramBuffer);
+            m_histogramShader.SetFloat("_Strength", m_settings.HistogramStrength);
+            m_histogramShader.SetInt(
                 "_ImagePixelCount",
-                _grayscaleTexture.width * _grayscaleTexture.height
+                m_grayscaleTexture.width * m_grayscaleTexture.height
             );
 
-            threadGroupsX = Mathf.CeilToInt(_grayscaleTexture.width / 8f);
-            threadGroupsY = Mathf.CeilToInt(_grayscaleTexture.height / 8f);
+            threadGroupsX = Mathf.CeilToInt(m_grayscaleTexture.width / 8f);
+            threadGroupsY = Mathf.CeilToInt(m_grayscaleTexture.height / 8f);
 
-            _histogramShader.Dispatch(_histogramApplyKernel, threadGroupsX, threadGroupsY, 1);
+            m_histogramShader.Dispatch(m_histogramApplyKernel, threadGroupsX, threadGroupsY, 1);
 
             // Swap textures
-            SwapTextures(ref _grayscaleTexture, ref _tempTexture);
+            SwapTextures(ref m_grayscaleTexture, ref m_tempTexture);
         }
 
         private void ApplyEdgeEnhancement()
         {
-            _preprocessorShader.SetTexture(_edgeEnhanceKernel, "_SourceTex", _grayscaleTexture);
-            _preprocessorShader.SetTexture(_edgeEnhanceKernel, "_ResultTex", _tempTexture);
-            _preprocessorShader.SetFloat("_EdgeStrength", _settings.edgeStrength);
+            m_preprocessorShader.SetTexture(m_edgeEnhanceKernel, "_SourceTex", m_grayscaleTexture);
+            m_preprocessorShader.SetTexture(m_edgeEnhanceKernel, "_ResultTex", m_tempTexture);
+            m_preprocessorShader.SetFloat("_EdgeStrength", m_settings.EdgeStrength);
 
-            int threadGroupsX = Mathf.CeilToInt(_grayscaleTexture.width / 8f);
-            int threadGroupsY = Mathf.CeilToInt(_grayscaleTexture.height / 8f);
+            int threadGroupsX = Mathf.CeilToInt(m_grayscaleTexture.width / 8f);
+            int threadGroupsY = Mathf.CeilToInt(m_grayscaleTexture.height / 8f);
 
-            _preprocessorShader.Dispatch(_edgeEnhanceKernel, threadGroupsX, threadGroupsY, 1);
+            m_preprocessorShader.Dispatch(m_edgeEnhanceKernel, threadGroupsX, threadGroupsY, 1);
 
             // Swap textures
-            SwapTextures(ref _grayscaleTexture, ref _tempTexture);
+            SwapTextures(ref m_grayscaleTexture, ref m_tempTexture);
         }
 
         private void ApplyAdaptiveThreshold()
         {
-            _preprocessorShader.SetTexture(
-                _adaptiveThresholdKernel,
+            m_preprocessorShader.SetTexture(
+                m_adaptiveThresholdKernel,
                 "_SourceTex",
-                _grayscaleTexture
+                m_grayscaleTexture
             );
-            _preprocessorShader.SetTexture(
-                _adaptiveThresholdKernel,
+            m_preprocessorShader.SetTexture(
+                m_adaptiveThresholdKernel,
                 "_ResultTex",
-                _processedTexture
+                m_processedTexture
             );
-            _preprocessorShader.SetInt("_BlockSize", _settings.adaptiveBlockSize);
-            _preprocessorShader.SetFloat("_Constant", _settings.adaptiveConstant / 255f);
+            m_preprocessorShader.SetInt("_BlockSize", m_settings.AdaptiveBlockSize);
+            m_preprocessorShader.SetFloat("_Constant", m_settings.AdaptiveConstant / 255f);
 
-            int threadGroupsX = Mathf.CeilToInt(_processedTexture.width / 8f);
-            int threadGroupsY = Mathf.CeilToInt(_processedTexture.height / 8f);
+            int threadGroupsX = Mathf.CeilToInt(m_processedTexture.width / 8f);
+            int threadGroupsY = Mathf.CeilToInt(m_processedTexture.height / 8f);
 
-            _preprocessorShader.Dispatch(_adaptiveThresholdKernel, threadGroupsX, threadGroupsY, 1);
+            m_preprocessorShader.Dispatch(
+                m_adaptiveThresholdKernel,
+                threadGroupsX,
+                threadGroupsY,
+                1
+            );
         }
 
         private void SwapTextures(ref RenderTexture a, ref RenderTexture b)
@@ -489,21 +497,21 @@ namespace AprilTag
         private void ConvertToRGBA()
         {
             // Get the final grayscale texture (either _processedTexture from adaptive threshold or _grayscaleTexture)
-            var sourceTexture = _settings.enableAdaptiveThreshold
-                ? _processedTexture
-                : _grayscaleTexture;
+            var sourceTexture = m_settings.EnableAdaptiveThreshold
+                ? m_processedTexture
+                : m_grayscaleTexture;
 
-            _preprocessorShader.SetTexture(_grayscaleToRGBAKernel, "_ResultTex", sourceTexture);
-            _preprocessorShader.SetTexture(
-                _grayscaleToRGBAKernel,
+            m_preprocessorShader.SetTexture(m_grayscaleToRGBAKernel, "_ResultTex", sourceTexture);
+            m_preprocessorShader.SetTexture(
+                m_grayscaleToRGBAKernel,
                 "_ResultTexRGBA",
-                _finalRGBATexture
+                m_finalRGBATexture
             );
 
-            int threadGroupsX = Mathf.CeilToInt(_finalRGBATexture.width / 8f);
-            int threadGroupsY = Mathf.CeilToInt(_finalRGBATexture.height / 8f);
+            int threadGroupsX = Mathf.CeilToInt(m_finalRGBATexture.width / 8f);
+            int threadGroupsY = Mathf.CeilToInt(m_finalRGBATexture.height / 8f);
 
-            _preprocessorShader.Dispatch(_grayscaleToRGBAKernel, threadGroupsX, threadGroupsY, 1);
+            m_preprocessorShader.Dispatch(m_grayscaleToRGBAKernel, threadGroupsX, threadGroupsY, 1);
         }
 
         /// <summary>
@@ -511,7 +519,7 @@ namespace AprilTag
         /// </summary>
         public Color32[] GetProcessedPixels()
         {
-            if (!_isInitialized || _finalRGBATexture == null)
+            if (!_isInitialized || m_finalRGBATexture == null)
             {
                 Debug.LogWarning(
                     "[AprilTagGPUPreprocessor] Cannot get processed pixels - preprocessor not initialized or final RGBA texture is null"
@@ -526,14 +534,14 @@ namespace AprilTag
 
                 // Read directly from RGBA texture
                 var tempTex = new Texture2D(
-                    _finalRGBATexture.width,
-                    _finalRGBATexture.height,
+                    m_finalRGBATexture.width,
+                    m_finalRGBATexture.height,
                     TextureFormat.RGBA32,
                     false
                 );
-                RenderTexture.active = _finalRGBATexture;
+                RenderTexture.active = m_finalRGBATexture;
                 tempTex.ReadPixels(
-                    new Rect(0, 0, _finalRGBATexture.width, _finalRGBATexture.height),
+                    new Rect(0, 0, m_finalRGBATexture.width, m_finalRGBATexture.height),
                     0,
                     0
                 );
@@ -556,7 +564,7 @@ namespace AprilTag
                 }
 
                 // Ensure we have the expected number of pixels
-                int expectedPixels = _finalRGBATexture.width * _finalRGBATexture.height;
+                int expectedPixels = m_finalRGBATexture.width * m_finalRGBATexture.height;
                 if (pixels.Length != expectedPixels)
                 {
                     Debug.LogError(
@@ -581,16 +589,16 @@ namespace AprilTag
         /// </summary>
         public void UpdateSettings(PreprocessingSettings newSettings)
         {
-            _settings = newSettings;
+            m_settings = newSettings;
 
             // Update Gaussian kernel if blur settings changed
-            if (_settings.enableNoiseReduction)
+            if (m_settings.EnableNoiseReduction)
             {
                 UpdateGaussianKernel();
             }
 
             // Recreate render textures if resolution settings changed
-            if (_settings.enableDownsampling)
+            if (m_settings.EnableDownsampling)
             {
                 DisposeRenderTextures();
                 CreateRenderTextures();
@@ -599,20 +607,20 @@ namespace AprilTag
 
         private void DisposeRenderTextures()
         {
-            _sourceTexture?.Release();
-            _grayscaleTexture?.Release();
-            _processedTexture?.Release();
-            _tempTexture?.Release();
-            _finalRGBATexture?.Release();
+            m_sourceTexture?.Release();
+            m_grayscaleTexture?.Release();
+            m_processedTexture?.Release();
+            m_tempTexture?.Release();
+            m_finalRGBATexture?.Release();
         }
 
         public void Dispose()
         {
             DisposeRenderTextures();
 
-            _histogramBuffer?.Dispose();
-            _cdfBuffer?.Dispose();
-            _gaussianKernel?.Dispose();
+            m_histogramBuffer?.Dispose();
+            m_cdfBuffer?.Dispose();
+            m_gaussianKernel?.Dispose();
 
             _isInitialized = false;
         }
