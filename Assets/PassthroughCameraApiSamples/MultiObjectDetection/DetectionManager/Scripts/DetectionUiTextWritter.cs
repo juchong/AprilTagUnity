@@ -10,10 +10,17 @@ namespace PassthroughCameraSamples.MultiObjectDetection
     [MetaCodeSample("PassthroughCameraApiSamples-MultiObjectDetection")]
     public class DetectionUiTextWritter : MonoBehaviour
     {
-        [SerializeField] private Text m_labelInfo;
-        [SerializeField] private float m_writtingSpeed = 0.00015f;
-        [SerializeField] private float m_writtingInfoPause = 0.005f;
-        [SerializeField] private AudioSource m_writtingSound;
+        [SerializeField]
+        private Text m_labelInfo;
+
+        [SerializeField]
+        private float m_writtingSpeed = 0.00015f;
+
+        [SerializeField]
+        private float m_writtingInfoPause = 0.005f;
+
+        [SerializeField]
+        private AudioSource m_writtingSound;
 
         public UnityEvent OnStartWritting;
         public UnityEvent OnFinishWritting;

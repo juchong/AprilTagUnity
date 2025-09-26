@@ -24,9 +24,18 @@ namespace PassthroughCameraSamples
         private static int? s_horizonOsVersion;
 
         // Caches
-        internal static readonly Dictionary<PassthroughCameraEye, (string id, int index)> CameraEyeToCameraIdMap = new();
-        private static readonly ConcurrentDictionary<PassthroughCameraEye, List<Vector2Int>> s_cameraOutputSizes = new();
-        private static readonly ConcurrentDictionary<string, AndroidJavaObject> s_cameraCharacteristicsMap = new();
+        internal static readonly Dictionary<
+            PassthroughCameraEye,
+            (string id, int index)
+        > CameraEyeToCameraIdMap = new();
+        private static readonly ConcurrentDictionary<
+            PassthroughCameraEye,
+            List<Vector2Int>
+        > s_cameraOutputSizes = new();
+        private static readonly ConcurrentDictionary<
+            string,
+            AndroidJavaObject
+        > s_cameraCharacteristicsMap = new();
         private static readonly OVRPose?[] s_cachedCameraPosesRelativeToHead = new OVRPose?[2];
 
         /// <summary>
@@ -64,9 +73,11 @@ namespace PassthroughCameraSamples
                 if (!s_isSupported.HasValue)
                 {
                     var headset = OVRPlugin.GetSystemHeadsetType();
-                    return (headset == OVRPlugin.SystemHeadset.Meta_Quest_3 ||
-                            headset == OVRPlugin.SystemHeadset.Meta_Quest_3S) &&
-                           (!HorizonOSVersion.HasValue || HorizonOSVersion >= MINSUPPORTOSVERSION);
+                    return (
+                            headset == OVRPlugin.SystemHeadset.Meta_Quest_3
+                            || headset == OVRPlugin.SystemHeadset.Meta_Quest_3S
+                        )
+                        && (!HorizonOSVersion.HasValue || HorizonOSVersion >= MINSUPPORTOSVERSION);
                 }
 
                 return s_isSupported.Value;
@@ -88,22 +99,33 @@ namespace PassthroughCameraSamples
         /// in pixels. The resolution value is the maximum resolution available for the camera.
         /// </summary>
         /// <param name="cameraEye">The passthrough camera</param>
-        public static PassthroughCameraIntrinsics GetCameraIntrinsics(PassthroughCameraEye cameraEye)
+        public static PassthroughCameraIntrinsics GetCameraIntrinsics(
+            PassthroughCameraEye cameraEye
+        )
         {
             var cameraCharacteristics = GetCameraCharacteristics(cameraEye);
-            var intrinsicsArr = GetCameraValueByKey<float[]>(cameraCharacteristics, "LENS_INTRINSIC_CALIBRATION");
+            var intrinsicsArr = GetCameraValueByKey<float[]>(
+                cameraCharacteristics,
+                "LENS_INTRINSIC_CALIBRATION"
+            );
 
             // Querying the camera resolution for which the intrinsics are provided
             // https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics#SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE
             // This is a Rect of 4 elements: [bottom, left, right, top] with (0,0) at top-left corner.
-            using var sensorSize = GetCameraValueByKey<AndroidJavaObject>(cameraCharacteristics, "SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE");
+            using var sensorSize = GetCameraValueByKey<AndroidJavaObject>(
+                cameraCharacteristics,
+                "SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE"
+            );
 
             return new PassthroughCameraIntrinsics
             {
                 FocalLength = new Vector2(intrinsicsArr[0], intrinsicsArr[1]),
                 PrincipalPoint = new Vector2(intrinsicsArr[2], intrinsicsArr[3]),
-                Resolution = new Vector2Int(sensorSize.Get<int>("right"), sensorSize.Get<int>("bottom")),
-                Skew = intrinsicsArr[4]
+                Resolution = new Vector2Int(
+                    sensorSize.Get<int>("right"),
+                    sensorSize.Get<int>("bottom")
+                ),
+                Skew = intrinsicsArr[4],
             };
         }
 
@@ -134,25 +156,45 @@ namespace PassthroughCameraSamples
             if (s_cachedCameraPosesRelativeToHead[index] == null)
             {
                 var cameraId = GetCameraIdByEye(cameraEye);
-                using var cameraCharacteristics = s_cameraManager.Call<AndroidJavaObject>("getCameraCharacteristics", cameraId);
+                using var cameraCharacteristics = s_cameraManager.Call<AndroidJavaObject>(
+                    "getCameraCharacteristics",
+                    cameraId
+                );
 
-                var cameraTranslation = GetCameraValueByKey<float[]>(cameraCharacteristics, "LENS_POSE_TRANSLATION");
-                var p_headFromCamera = new Vector3(cameraTranslation[0], cameraTranslation[1], -cameraTranslation[2]);
+                var cameraTranslation = GetCameraValueByKey<float[]>(
+                    cameraCharacteristics,
+                    "LENS_POSE_TRANSLATION"
+                );
+                var p_headFromCamera = new Vector3(
+                    cameraTranslation[0],
+                    cameraTranslation[1],
+                    -cameraTranslation[2]
+                );
 
-                var cameraRotation = GetCameraValueByKey<float[]>(cameraCharacteristics, "LENS_POSE_ROTATION");
-                var q_cameraFromHead = new Quaternion(-cameraRotation[0], -cameraRotation[1], cameraRotation[2], cameraRotation[3]);
+                var cameraRotation = GetCameraValueByKey<float[]>(
+                    cameraCharacteristics,
+                    "LENS_POSE_ROTATION"
+                );
+                var q_cameraFromHead = new Quaternion(
+                    -cameraRotation[0],
+                    -cameraRotation[1],
+                    cameraRotation[2],
+                    cameraRotation[3]
+                );
 
                 var q_headFromCamera = Quaternion.Inverse(q_cameraFromHead);
 
                 s_cachedCameraPosesRelativeToHead[index] = new OVRPose
                 {
                     position = p_headFromCamera,
-                    orientation = q_headFromCamera
+                    orientation = q_headFromCamera,
                 };
             }
 
             var headFromCamera = s_cachedCameraPosesRelativeToHead[index].Value;
-            var worldFromHead = OVRPlugin.GetNodePoseStateImmediate(OVRPlugin.Node.Head).Pose.ToOVRPose();
+            var worldFromHead = OVRPlugin
+                .GetNodePoseStateImmediate(OVRPlugin.Node.Head)
+                .Pose.ToOVRPose();
             var worldFromCamera = worldFromHead * headFromCamera;
             worldFromCamera.orientation *= Quaternion.Euler(180, 0, 0);
 
@@ -168,7 +210,10 @@ namespace PassthroughCameraSamples
         ///     maximum available camera resolution. This resolution can be obtained using <see cref="GetCameraIntrinsics"/>
         ///     or <see cref="GetOutputSizes"/> methods.
         /// </param>
-        public static Ray ScreenPointToRayInWorld(PassthroughCameraEye cameraEye, Vector2Int screenPoint)
+        public static Ray ScreenPointToRayInWorld(
+            PassthroughCameraEye cameraEye,
+            Vector2Int screenPoint
+        )
         {
             var rayInCamera = ScreenPointToRayInCamera(cameraEye, screenPoint);
             var cameraPoseInWorld = GetCameraPoseInWorld(cameraEye);
@@ -185,14 +230,17 @@ namespace PassthroughCameraSamples
         /// maximum available camera resolution. This resolution can be obtained using <see cref="GetCameraIntrinsics"/>
         /// or <see cref="GetOutputSizes"/> methods.
         /// </param>
-        public static Ray ScreenPointToRayInCamera(PassthroughCameraEye cameraEye, Vector2Int screenPoint)
+        public static Ray ScreenPointToRayInCamera(
+            PassthroughCameraEye cameraEye,
+            Vector2Int screenPoint
+        )
         {
             var intrinsics = GetCameraIntrinsics(cameraEye);
             var directionInCamera = new Vector3
             {
                 x = (screenPoint.x - intrinsics.PrincipalPoint.x) / intrinsics.FocalLength.x,
                 y = (screenPoint.y - intrinsics.PrincipalPoint.y) / intrinsics.FocalLength.y,
-                z = 1
+                z = 1,
             };
 
             return new Ray(Vector3.zero, directionInCamera);
@@ -210,8 +258,14 @@ namespace PassthroughCameraSamples
             Debug.Log($"PCA: PassthroughCamera - Initializing...");
             using var activityClass = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
             s_currentActivity = activityClass.GetStatic<AndroidJavaObject>("currentActivity");
-            s_cameraManager = s_currentActivity.Call<AndroidJavaObject>("getSystemService", "camera");
-            Assert.IsNotNull(s_cameraManager, "Camera manager has not been provided by the Android system");
+            s_cameraManager = s_currentActivity.Call<AndroidJavaObject>(
+                "getSystemService",
+                "camera"
+            );
+            Assert.IsNotNull(
+                s_cameraManager,
+                "Camera manager has not been provided by the Android system"
+            );
 
             var cameraIds = GetCameraIdList();
             Debug.Log($"PCA: PassthroughCamera - cameraId list is {string.Join(", ", cameraIds)}");
@@ -230,20 +284,38 @@ namespace PassthroughCameraSamples
                     using var key = keysList.Call<AndroidJavaObject>("get", i);
                     var keyName = key.Call<string>("getName");
 
-                    if (string.Equals(keyName, "com.meta.extra_metadata.camera_source", StringComparison.OrdinalIgnoreCase))
+                    if (
+                        string.Equals(
+                            keyName,
+                            "com.meta.extra_metadata.camera_source",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
                     {
                         // Both `com.meta.extra_metadata.camera_source` and `com.meta.extra_metadata.camera_source` are
                         // custom camera fields which are stored as arrays of size 1, instead of single values.
                         // We have to read those values correspondingly
-                        var cameraSourceArr = GetCameraValueByKey<sbyte[]>(cameraCharacteristics, key);
+                        var cameraSourceArr = GetCameraValueByKey<sbyte[]>(
+                            cameraCharacteristics,
+                            key
+                        );
                         if (cameraSourceArr == null || cameraSourceArr.Length != 1)
                             continue;
 
                         cameraSource = (CameraSource)cameraSourceArr[0];
                     }
-                    else if (string.Equals(keyName, "com.meta.extra_metadata.position", StringComparison.OrdinalIgnoreCase))
+                    else if (
+                        string.Equals(
+                            keyName,
+                            "com.meta.extra_metadata.position",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
                     {
-                        var cameraPositionArr = GetCameraValueByKey<sbyte[]>(cameraCharacteristics, key);
+                        var cameraPositionArr = GetCameraValueByKey<sbyte[]>(
+                            cameraCharacteristics,
+                            key
+                        );
                         if (cameraPositionArr == null || cameraPositionArr.Length != 1)
                             continue;
 
@@ -251,7 +323,11 @@ namespace PassthroughCameraSamples
                     }
                 }
 
-                if (!cameraSource.HasValue || !cameraPosition.HasValue || cameraSource.Value != CameraSource.Passthrough)
+                if (
+                    !cameraSource.HasValue
+                    || !cameraPosition.HasValue
+                    || cameraSource.Value != CameraSource.Passthrough
+                )
                     continue;
 
                 switch (cameraPosition)
@@ -265,7 +341,9 @@ namespace PassthroughCameraSamples
                         CameraEyeToCameraIdMap[PassthroughCameraEye.Right] = (cameraId, idIndex);
                         break;
                     default:
-                        throw new ApplicationException($"Cannot parse Camera Position value {cameraPosition}");
+                        throw new ApplicationException(
+                            $"Cannot parse Camera Position value {cameraPosition}"
+                        );
                 }
             }
 
@@ -274,9 +352,9 @@ namespace PassthroughCameraSamples
 
         internal static bool IsPassthroughEnabled()
         {
-            return OVRManager.IsInsightPassthroughSupported() &&
-                OVRManager.IsInsightPassthroughInitialized() &&
-                OVRManager.instance.isInsightPassthroughEnabled;
+            return OVRManager.IsInsightPassthroughSupported()
+                && OVRManager.IsInsightPassthroughInitialized()
+                && OVRManager.instance.isInsightPassthroughEnabled;
         }
 
         private static string[] GetCameraIdList()
@@ -290,9 +368,14 @@ namespace PassthroughCameraSamples
 
             var cameraId = GetCameraIdByEye(cameraEye);
             var cameraCharacteristics = GetCameraCharacteristics(cameraId);
-            using var configurationMap =
-                GetCameraValueByKey<AndroidJavaObject>(cameraCharacteristics, "SCALER_STREAM_CONFIGURATION_MAP");
-            var outputSizes = configurationMap.Call<AndroidJavaObject[]>("getOutputSizes", YUV_420_888);
+            using var configurationMap = GetCameraValueByKey<AndroidJavaObject>(
+                cameraCharacteristics,
+                "SCALER_STREAM_CONFIGURATION_MAP"
+            );
+            var outputSizes = configurationMap.Call<AndroidJavaObject[]>(
+                "getOutputSizes",
+                YUV_420_888
+            );
 
             var result = new List<Vector2Int>();
             foreach (var outputSize in outputSizes)
@@ -312,8 +395,10 @@ namespace PassthroughCameraSamples
 
         private static AndroidJavaObject GetCameraCharacteristics(string cameraId)
         {
-            return s_cameraCharacteristicsMap.GetOrAdd(cameraId,
-                _ => s_cameraManager.Call<AndroidJavaObject>("getCameraCharacteristics", cameraId));
+            return s_cameraCharacteristicsMap.GetOrAdd(
+                cameraId,
+                _ => s_cameraManager.Call<AndroidJavaObject>("getCameraCharacteristics", cameraId)
+            );
         }
 
         private static AndroidJavaObject GetCameraCharacteristics(PassthroughCameraEye eye)
@@ -322,26 +407,32 @@ namespace PassthroughCameraSamples
             return GetCameraCharacteristics(cameraId);
         }
 
-        private static T GetCameraValueByKey<T>(AndroidJavaObject cameraCharacteristics, string keyStr)
+        private static T GetCameraValueByKey<T>(
+            AndroidJavaObject cameraCharacteristics,
+            string keyStr
+        )
         {
             using var key = cameraCharacteristics.GetStatic<AndroidJavaObject>(keyStr);
             return GetCameraValueByKey<T>(cameraCharacteristics, key);
         }
 
-        private static T GetCameraValueByKey<T>(AndroidJavaObject cameraCharacteristics, AndroidJavaObject key)
+        private static T GetCameraValueByKey<T>(
+            AndroidJavaObject cameraCharacteristics,
+            AndroidJavaObject key
+        )
         {
             return cameraCharacteristics.Call<T>("get", key);
         }
 
         private enum CameraSource
         {
-            Passthrough = 0
+            Passthrough = 0,
         }
 
         private enum CameraPosition
         {
             Left = 0,
-            Right = 1
+            Right = 1,
         }
 
         #endregion Private methods
@@ -356,14 +447,17 @@ namespace PassthroughCameraSamples
         /// The focal length in pixels
         /// </summary>
         public Vector2 FocalLength;
+
         /// <summary>
         /// The principal point from the top-left corner of the image, expressed in pixels
         /// </summary>
         public Vector2 PrincipalPoint;
+
         /// <summary>
         /// The resolution in pixels for which the intrinsics are defined
         /// </summary>
         public Vector2Int Resolution;
+
         /// <summary>
         /// The skew coefficient which represents the non-perpendicularity of the image sensor's x and y axes
         /// </summary>

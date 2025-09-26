@@ -10,11 +10,21 @@ namespace PassthroughCameraSamples.BrightnessEstimation
     [MetaCodeSample("PassthroughCameraApiSamples-BrightnessEstimation")]
     public class BrightnessEstimationManager : MonoBehaviour
     {
-        [SerializeField] private WebCamTextureManager m_webCamTextureManager;
-        [SerializeField] private float m_refreshTime = 0.05f;
-        [SerializeField][Range(1, 100)] private int m_bufferSize = 10;
-        [SerializeField] private UnityEvent<float> m_onBrightnessChange;
-        [SerializeField] private UnityEngine.UI.Text m_debugger;
+        [SerializeField]
+        private WebCamTextureManager m_webCamTextureManager;
+
+        [SerializeField]
+        private float m_refreshTime = 0.05f;
+
+        [SerializeField]
+        [Range(1, 100)]
+        private int m_bufferSize = 10;
+
+        [SerializeField]
+        private UnityEvent<float> m_onBrightnessChange;
+
+        [SerializeField]
+        private UnityEngine.UI.Text m_debugger;
 
         private float m_refreshCurrentTime = 0.0f;
         private List<float> m_brightnessVals = new();
@@ -35,7 +45,10 @@ namespace PassthroughCameraSamples.BrightnessEstimation
             }
             else
             {
-                m_debugger.text = PassthroughCameraPermissions.HasCameraPermission == true ? "Permission granted." : "No permission granted.";
+                m_debugger.text =
+                    PassthroughCameraPermissions.HasCameraPermission == true
+                        ? "Permission granted."
+                        : "No permission granted.";
             }
         }
 
@@ -59,7 +72,10 @@ namespace PassthroughCameraSamples.BrightnessEstimation
             float colorSum = 0;
             for (int x = 0, len = m_pixelsBuffer.Length; x < len; x++)
             {
-                colorSum += 0.2126f * m_pixelsBuffer[x].r + 0.7152f * m_pixelsBuffer[x].g + 0.0722f * m_pixelsBuffer[x].b;
+                colorSum +=
+                    0.2126f * m_pixelsBuffer[x].r
+                    + 0.7152f * m_pixelsBuffer[x].g
+                    + 0.0722f * m_pixelsBuffer[x].b;
             }
             var brightnessVals = Mathf.Floor(colorSum / (w * h));
 

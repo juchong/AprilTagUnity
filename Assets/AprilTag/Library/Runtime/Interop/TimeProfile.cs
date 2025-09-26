@@ -1,53 +1,52 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace AprilTag.Interop {
-
-[StructLayoutAttribute(LayoutKind.Sequential)]
-public unsafe struct TimeProfileEntry
+namespace AprilTag.Interop
 {
-    #region Internal data structure
-
-    fixed byte name[32];
-    long utime;
-
-    #endregion
-
-    #region Public accessors
-
-    public string Name => ConvertName();
-    public long UTime => utime;
-
-    #endregion
-
-    #region Internal method
-
-    unsafe string ConvertName()
+    [StructLayoutAttribute(LayoutKind.Sequential)]
+    public unsafe struct TimeProfileEntry
     {
-        fixed (byte* p = name) return Marshal.PtrToStringAnsi((IntPtr)p);
+        #region Internal data structure
+
+        fixed byte name[32];
+        long utime;
+
+        #endregion
+
+        #region Public accessors
+
+        public string Name => ConvertName();
+        public long UTime => utime;
+
+        #endregion
+
+        #region Internal method
+
+        unsafe string ConvertName()
+        {
+            fixed (byte* p = name)
+                return Marshal.PtrToStringAnsi((IntPtr)p);
+        }
+
+        #endregion
     }
 
-    #endregion
-}
+    [StructLayoutAttribute(LayoutKind.Sequential)]
+    public struct TimeProfile
+    {
+        #region Internal data structure
 
-[StructLayoutAttribute(LayoutKind.Sequential)]
-public struct TimeProfile
-{
-    #region Internal data structure
+        long utime;
+        IntPtr stamps;
 
-    long utime;
-    IntPtr stamps;
+        #endregion
 
-    #endregion
+        #region Public accessors
 
-    #region Public accessors
+        public long UTime => utime;
 
-    public long UTime => utime;
+        public unsafe Span<TimeProfileEntry> Stamps => ((ZArray<TimeProfileEntry>*)stamps)->AsSpan;
 
-    public unsafe Span<TimeProfileEntry> Stamps
-      => ((ZArray<TimeProfileEntry>*)stamps)->AsSpan;
-
-    #endregion
-}
-
+        #endregion
+    }
 } // namespace AprilTag.Interop

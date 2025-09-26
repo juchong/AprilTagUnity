@@ -10,11 +10,22 @@ namespace PassthroughCameraSamples.BrightnessEstimation
     [MetaCodeSample("PassthroughCameraApiSamples-BrightnessEstimation")]
     public class BrightnessEstimationDebugger : MonoBehaviour
     {
-        [SerializeField] private Text m_debugger;
-        [SerializeField] private UnityEvent m_onTooDark;
-        [SerializeField] private UnityEvent m_onTooLight;
-        [Range(0, 100)][SerializeField] private float m_minBrightnessLevel = 10;
-        [Range(0, 100)][SerializeField] private float m_maxBrightnessLevel = 50;
+        [SerializeField]
+        private Text m_debugger;
+
+        [SerializeField]
+        private UnityEvent m_onTooDark;
+
+        [SerializeField]
+        private UnityEvent m_onTooLight;
+
+        [Range(0, 100)]
+        [SerializeField]
+        private float m_minBrightnessLevel = 10;
+
+        [Range(0, 100)]
+        [SerializeField]
+        private float m_maxBrightnessLevel = 50;
 
         private int m_isDark = 2;
         private string m_brightnessStatus = "";
