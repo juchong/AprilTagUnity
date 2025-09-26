@@ -163,7 +163,7 @@ MonoBehaviour:
   m_ignoreOcclusion: 1
   m_positionScaleFactor: 1
   m_minDetectionDistance: 0.3
-  m_maxDetectionDistance: 20
+  m_maxDetectionDistance: 15
   m_enableDistanceScaling: 1
   m_enableQuestDebugging: 1
   m_useImprovedIntrinsics: 0
