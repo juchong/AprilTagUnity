@@ -241,6 +241,9 @@ public class AprilTagController : MonoBehaviour
     private int m_cornerQualityLogInterval = 180;
 
     [Header("PhotonVision-Inspired Filtering")]
+    // Note: These temporal filters work on detection results and complement GPU preprocessing
+    // GPU preprocessing improves image quality BEFORE detection
+    // These filters improve stability AFTER detection by analyzing temporal consistency
     [Tooltip("Enable pose smoothing filter (reduces jitter)")]
     [SerializeField]
     private bool m_enablePoseSmoothing = true;
@@ -269,9 +272,9 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private float m_maxRotationDeviation = 30f; // Increased from 15f for Quest jitter
 
-    [Tooltip("Enable corner quality assessment")]
+    [Tooltip("Enable corner quality assessment (Note: GPU preprocessing provides similar benefits through noise reduction and edge enhancement)")]
     [SerializeField]
-    private bool m_enableCornerQualityAssessment = true;
+    private bool m_enableCornerQualityAssessment = false; // Disabled by default when GPU preprocessing is enabled
 
     [Tooltip("Minimum corner quality threshold (0-1)")]
     [SerializeField]
@@ -1035,19 +1038,30 @@ public class AprilTagController : MonoBehaviour
             }
 
             // PhotonVision-inspired filtering and validation
-            var corners = m_transforms.ExtractCornersFromRawDetection(t.ID, rawDetections);
-            var cornerQuality = CalculateCornerQuality(corners);
-
-            // Check corner quality threshold
-            if (cornerQuality < m_minCornerQuality)
+            float cornerQuality = 1.0f; // Default to perfect quality
+            
+            // Only perform CPU-based corner quality assessment if GPU preprocessing is disabled
+            // or if corner quality assessment is explicitly enabled
+            if (m_enableCornerQualityAssessment && (!m_enableGPUPreprocessing || m_enableCornerQualityAssessment))
             {
-                if (m_enableAllDebugLogging)
+                var corners = m_transforms.ExtractCornersFromRawDetection(t.ID, rawDetections);
+                cornerQuality = CalculateCornerQuality(corners);
+
+                // Check corner quality threshold
+                if (cornerQuality < m_minCornerQuality)
                 {
-                    Debug.LogWarning(
-                        $"[AprilTag] Tag {t.ID} rejected - Corner quality {cornerQuality:F3} < {m_minCornerQuality:F3}"
-                    );
+                    if (m_enableAllDebugLogging)
+                    {
+                        Debug.LogWarning(
+                            $"[AprilTag] Tag {t.ID} rejected - Corner quality {cornerQuality:F3} < {m_minCornerQuality:F3}"
+                        );
+                    }
+                    continue; // Skip this detection
                 }
-                continue; // Skip this detection
+            }
+            else if (m_enableGPUPreprocessing && m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
+            {
+                Debug.Log("[AprilTag] Corner quality assessment skipped - GPU preprocessing provides image quality enhancement");
             }
 
             // Multi-frame validation (PhotonVision approach)

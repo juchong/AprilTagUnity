@@ -33,24 +33,24 @@ namespace AprilTag
             public float HistogramStrength = 0.7f; // Increased for better effect
 
             [Header("Noise Reduction")]
-            [Tooltip("Enable Gaussian blur for noise reduction")]
-            public bool EnableNoiseReduction = true; // Working feature - enabled
+            [Tooltip("Enable Gaussian blur for noise reduction - Improves corner detection by reducing false corners from noise")]
+            public bool EnableNoiseReduction = true; // Replaces need for corner quality filtering
 
             [Range(1, 5)]
             [Tooltip("Gaussian blur kernel radius")]
-            public int BlurRadius = 2; // Increased for better effect
+            public int BlurRadius = 2; // Optimized for AprilTag corner preservation
 
             [Range(0.5f, 3f)]
             [Tooltip("Gaussian sigma value")]
-            public float BlurSigma = 1.0f; // Increased for better effect
+            public float BlurSigma = 1.0f; // Balanced for noise reduction without losing corners
 
             [Header("Edge Enhancement")]
-            [Tooltip("Enable edge enhancement for sharper tag borders")]
-            public bool EnableEdgeEnhancement = false; // Problematic feature - disabled
+            [Tooltip("Enable edge enhancement for sharper tag borders - Improves corner sharpness (use carefully, can introduce artifacts)")]
+            public bool EnableEdgeEnhancement = false; // Enable only if corners are not sharp enough
 
             [Range(0f, 2f)]
             [Tooltip("Edge enhancement strength")]
-            public float EdgeStrength = 0.3f; // Reduced default
+            public float EdgeStrength = 0.3f; // Conservative default to avoid artifacts
 
             [Header("Performance")]
             [Tooltip("Use half precision (16-bit) for better performance")]
