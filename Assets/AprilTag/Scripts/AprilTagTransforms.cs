@@ -18,6 +18,11 @@ public class AprilTagTransforms : MonoBehaviour
     [SerializeField]
     private AprilTagController m_controller;
 
+    // Cache for last known raycast distances per tag to ensure consistent positioning
+    // When environment raycast misses, we use the last successful distance instead of
+    // switching to a completely different positioning method
+    private Dictionary<int, float> m_lastRaycastDistance = new Dictionary<int, float>();
+
     // Controller-backed accessors to avoid duplicated state
     private bool m_enableAllDebugLogging =>
         m_controller != null && m_controller.EnableAllDebugLogging;
@@ -407,34 +412,71 @@ public class AprilTagTransforms : MonoBehaviour
             {
                 if (m_environmentRaycastManager.Raycast(ray, out var hitInfo))
                 {
+                    // Raycast hit - cache the distance for this tag
+                    var raycastDistance = Vector3.Distance(ray.origin, hitInfo.point);
+                    m_lastRaycastDistance[tagPose.ID] = raycastDistance;
+
                     if (m_enableAllDebugLogging)
                     {
-                        Debug.Log($"[AprilTag] Corner-based positioning hit at: {hitInfo.point}");
+                        Debug.Log(
+                            $"[AprilTag] Tag {tagPose.ID} raycast HIT at: {hitInfo.point}, distance: {raycastDistance:F3}m"
+                        );
                     }
                     return hitInfo.point;
                 }
                 else
                 {
+                    // Raycast missed - use last known distance if available
+                    if (m_lastRaycastDistance.TryGetValue(tagPose.ID, out var lastDistance))
+                    {
+                        var consistentPosition = ray.origin + ray.direction * lastDistance;
+
+                        if (m_enableAllDebugLogging)
+                        {
+                            Debug.Log(
+                                $"[AprilTag] Tag {tagPose.ID} raycast MISS, using last known distance: {lastDistance:F3}m -> {consistentPosition}"
+                            );
+                        }
+
+                        return consistentPosition;
+                    }
+
                     if (m_enableAllDebugLogging)
                     {
                         Debug.LogWarning(
-                            "[AprilTag] Corner-based positioning: Environment raycast missed, using fallback"
+                            $"[AprilTag] Tag {tagPose.ID} raycast MISS with no history, using tag distance fallback"
                         );
                     }
                 }
             }
 
-            // Fallback: use AprilTag's 3D pose directly for more accurate positioning
-            var cam = GetCorrectCameraReference();
-            var adjustedPosition = (tagPose.Position + m_positionOffset) * m_positionScaleFactor;
-            var worldPosition = cam.position + cam.rotation * adjustedPosition;
+            // Fallback: use AprilTag's 3D pose distance for initial positioning
+            // This ensures we use the ray direction but with the tag's reported distance
+            var tagDistance = tagPose.Position.magnitude;
+            var clampedDistance = Mathf.Clamp(
+                tagDistance,
+                m_minDetectionDistance,
+                m_maxDetectionDistance
+            );
+
+            if (m_enableDistanceScaling)
+            {
+                clampedDistance = ApplyDistanceScaling(clampedDistance);
+            }
+
+            var fallbackPosition = ray.origin + ray.direction * clampedDistance;
+
+            // Cache this distance for future frames
+            m_lastRaycastDistance[tagPose.ID] = clampedDistance;
 
             if (m_enableAllDebugLogging)
             {
-                Debug.Log($"[AprilTag] Corner-based positioning fallback: {worldPosition}");
+                Debug.Log(
+                    $"[AprilTag] Tag {tagPose.ID} using tag distance fallback: {clampedDistance:F3}m -> {fallbackPosition}"
+                );
             }
 
-            return worldPosition;
+            return fallbackPosition;
         }
         catch (Exception e)
         {
@@ -1168,12 +1210,28 @@ public class AprilTagTransforms : MonoBehaviour
                 && m_environmentRaycastManager.Raycast(ray, out var hitInfo)
             )
             {
+                // Raycast hit - cache the distance for consistent fallback
+                var raycastDistance = Vector3.Distance(ray.origin, hitInfo.point);
+                m_lastRaycastDistance[tagPose.ID] = raycastDistance;
+
                 return hitInfo.point;
             }
             else
             {
-                // Fallback: project the ray forward to a reasonable distance
-                // Use the actual tag distance with proper bounds checking
+                // Raycast missed - use last known distance if available
+                if (m_lastRaycastDistance.TryGetValue(tagPose.ID, out var lastDistance))
+                {
+                    if (m_enableAllDebugLogging)
+                    {
+                        Debug.Log(
+                            $"[AprilTag] Tag {tagPose.ID} passthrough raycast MISS, using last distance: {lastDistance:F3}m"
+                        );
+                    }
+
+                    return ray.origin + ray.direction * lastDistance;
+                }
+
+                // No history - use tag's reported distance as initial estimate
                 var rawDistance = tagPose.Position.magnitude;
                 var clampedDistance = Mathf.Clamp(
                     rawDistance,
@@ -1186,6 +1244,9 @@ public class AprilTagTransforms : MonoBehaviour
                 {
                     clampedDistance = ApplyDistanceScaling(clampedDistance);
                 }
+
+                // Cache this initial distance
+                m_lastRaycastDistance[tagPose.ID] = clampedDistance;
 
                 return ray.origin + ray.direction * clampedDistance;
             }
