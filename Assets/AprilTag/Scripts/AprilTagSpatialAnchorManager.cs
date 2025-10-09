@@ -71,9 +71,23 @@ namespace AprilTag
         private float m_maxKeepOutRadius = 0.1f; // 10cm maximum
 
         [Header("Quest Controller Input")]
-        [Tooltip("Enable A button on right controller to clear all anchors")]
+        [Tooltip("Enable X button on right controller to clear all anchors")]
         [SerializeField]
         private bool m_enableClearAnchorsInput = true;
+
+        [Tooltip("Enable Y button on right controller to delete individual anchor by pointing")]
+        [SerializeField]
+        private bool m_enablePointAndDeleteInput = true;
+
+        [Tooltip("Maximum distance for point-and-delete raycast (meters)")]
+        [Range(0.5f, 10.0f)]
+        [SerializeField]
+        private float m_pointDeleteMaxDistance = 5.0f;
+
+        [Tooltip("Maximum angle between controller and anchor for deletion (degrees)")]
+        [Range(5.0f, 45.0f)]
+        [SerializeField]
+        private float m_pointDeleteMaxAngle = 15.0f;
 
         [Header("Debug")]
         [Tooltip("Enable debug logging for anchor operations")]
@@ -91,7 +105,8 @@ namespace AprilTag
 
         // Quest controller input
         private OVRInput.Controller m_rightController = OVRInput.Controller.RTouch;
-        private bool m_lastAButtonState = false;
+        private bool m_lastXButtonState = false;
+        private bool m_lastYButtonState = false;
 
         // Events
         public static event Action<int, OVRSpatialAnchor> OnAnchorCreated;
@@ -306,10 +321,16 @@ namespace AprilTag
 
         private void Update()
         {
-            // Handle Quest controller input for clearing anchors
+            // Handle Quest controller input for clearing all anchors
             if (m_enableClearAnchorsInput)
             {
                 HandleClearAnchorsInput();
+            }
+
+            // Handle Quest controller input for point-and-delete individual anchors
+            if (m_enablePointAndDeleteInput)
+            {
+                HandlePointAndDeleteInput();
             }
 
             // Clean up stale placement states
@@ -537,6 +558,7 @@ namespace AprilTag
                 );
             }
 
+            // Check if anchor already exists or is being created (prevent race condition)
             if (m_anchorsById.ContainsKey(tagId))
             {
                 if (m_enableDebugLogging)
@@ -549,6 +571,19 @@ namespace AprilTag
             }
 
             var state = m_placementStates[tagId];
+            
+            // CRITICAL: Prevent race condition where multiple frames try to create anchor
+            if (state.IsPlacementInProgress)
+            {
+                if (m_enableDebugLogging)
+                {
+                    Debug.LogWarning(
+                        $"[AprilTagSpatialAnchorManager] Anchor creation already in progress for tag {tagId}, skipping"
+                    );
+                }
+                return;
+            }
+            
             state.IsPlacementInProgress = true;
 
             // Create or use default prefab
@@ -562,7 +597,6 @@ namespace AprilTag
 
             // Store the anchor
             m_anchorsById[tagId] = spatialAnchor;
-            m_anchorUuids[tagId] = spatialAnchor.Uuid;
 
             // Update state
             state.IsPlaced = true;
@@ -586,17 +620,227 @@ namespace AprilTag
                 );
             }
 
+            // CRITICAL: Wait for anchor to be created, then save to local device storage
+            // The OVRSpatialAnchor component needs time to initialize and get a valid UUID
+            // By default, SaveAnchorAsync() uses LOCAL storage (works offline, no cloud required)
+            // Without proper saving, anchors only exist in memory and are lost on app restart
+            if (m_persistAnchors)
+            {
+                WaitForAnchorCreationThenSave(spatialAnchor, tagId);
+            }
+
             // Fire event
             OnAnchorCreated?.Invoke(tagId, spatialAnchor);
         }
 
         /// <summary>
-        /// Remove a spatial anchor for a specific tag
+        /// Wait for the OVRSpatialAnchor to be fully created, then save it
         /// </summary>
-        private void RemoveAnchorForTag(int tagId)
+        private void WaitForAnchorCreationThenSave(OVRSpatialAnchor anchor, int tagId)
+        {
+            _ = StartCoroutine(WaitForAnchorCreationCoroutine(anchor, tagId));
+        }
+
+        /// <summary>
+        /// Coroutine that waits for the anchor to have a valid UUID before saving
+        /// </summary>
+        private System.Collections.IEnumerator WaitForAnchorCreationCoroutine(
+            OVRSpatialAnchor anchor,
+            int tagId
+        )
+        {
+            if (anchor == null)
+            {
+                Debug.LogError(
+                    $"[AprilTagSpatialAnchorManager] Cannot wait for null anchor (tag {tagId})"
+                );
+                yield break;
+            }
+
+            // Wait for the OVRSpatialAnchor component to finish initializing
+            // This happens in its Start() method, which runs after our code
+            yield return null; // Wait one frame for Start() to run
+
+            // Wait for a valid UUID (not empty GUID)
+            var maxWaitFrames = 300; // 5 seconds at 60 FPS
+            var framesWaited = 0;
+
+            while (anchor != null && anchor.Uuid == System.Guid.Empty && framesWaited < maxWaitFrames)
+            {
+                framesWaited++;
+                yield return null;
+            }
+
+            // Check if anchor was destroyed while waiting
+            if (anchor == null || !m_anchorsById.ContainsKey(tagId))
+            {
+                if (m_enableDebugLogging)
+                {
+                    Debug.LogWarning(
+                        $"[AprilTagSpatialAnchorManager] Anchor for tag {tagId} was destroyed while waiting for creation"
+                    );
+                }
+                yield break;
+            }
+
+            // Check if we got a valid UUID
+            if (anchor.Uuid == System.Guid.Empty)
+            {
+                Debug.LogWarning(
+                    $"[AprilTagSpatialAnchorManager] Anchor for tag {tagId} failed to get valid UUID after {framesWaited} frames - anchor will remain active but won't persist"
+                );
+                
+                // IMPORTANT: Keep the anchor even without UUID
+                // The GameObject still exists and is world-locked by the OVRSpatialAnchor component
+                // It just won't be saved for future sessions
+                yield break;
+            }
+
+            // UUID is valid, store it and save to cloud
+            m_anchorUuids[tagId] = anchor.Uuid;
+
+            if (m_enableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Anchor for tag {tagId} initialized with UUID {anchor.Uuid} after {framesWaited} frames"
+                );
+            }
+
+            // Now save the anchor with the valid UUID
+            SaveAnchorAsync(anchor, tagId);
+        }
+
+        /// <summary>
+        /// Save a spatial anchor to local device storage for persistence (works offline)
+        /// </summary>
+        private async void SaveAnchorAsync(OVRSpatialAnchor anchor, int tagId)
+        {
+            if (anchor == null)
+            {
+                Debug.LogError(
+                    $"[AprilTagSpatialAnchorManager] Cannot save null anchor for tag {tagId}"
+                );
+                return;
+            }
+
+            try
+            {
+                if (m_enableDebugLogging)
+                {
+                    Debug.Log(
+                        $"[AprilTagSpatialAnchorManager] Saving anchor for tag {tagId} to local storage (UUID: {anchor.Uuid})..."
+                    );
+                }
+
+                // Save the anchor to local device storage (no cloud/internet required)
+                // This is the default behavior of SaveAnchorAsync() - anchors persist across app sessions
+                var success = await anchor.SaveAnchorAsync();
+                
+                if (m_enableDebugLogging)
+                {
+                    Debug.Log(
+                        $"[AprilTagSpatialAnchorManager] SaveAnchorAsync completed for tag {tagId}: success={success}"
+                    );
+                }
+
+                if (success)
+                {
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            $"[AprilTagSpatialAnchorManager] Successfully saved anchor for tag {tagId} to local device storage"
+                        );
+                    }
+
+                    // After successful save, update PlayerPrefs with the anchor data
+                    SaveAnchorsToStorage();
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        $"[AprilTagSpatialAnchorManager] Failed to save anchor for tag {tagId} to local device storage - anchor will remain active but won't persist across sessions"
+                    );
+                    
+                    // IMPORTANT: Keep the anchor even if save fails
+                    // The anchor still works as a world-locked object in the current session
+                    // We just won't be able to load it on next app launch
+                    // This prevents anchors from disappearing when save fails
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning(
+                    $"[AprilTagSpatialAnchorManager] Exception while saving anchor for tag {tagId}: {e.Message} - anchor will remain active but won't persist"
+                );
+                
+                // IMPORTANT: Keep the anchor even on exception
+                // The anchor still works in the current session
+            }
+        }
+
+        /// <summary>
+        /// Erase a spatial anchor from local device storage
+        /// </summary>
+        private async void EraseAnchorAsync(OVRSpatialAnchor anchor, int tagId)
+        {
+            if (anchor == null)
+            {
+                Debug.LogError(
+                    $"[AprilTagSpatialAnchorManager] Cannot erase null anchor for tag {tagId}"
+                );
+                return;
+            }
+
+            try
+            {
+                if (m_enableDebugLogging)
+                {
+                    Debug.Log(
+                        $"[AprilTagSpatialAnchorManager] Erasing anchor for tag {tagId} from local storage (UUID: {anchor.Uuid})..."
+                    );
+                }
+
+                // Erase the anchor from local device storage (no cloud/internet required)
+                var success = await anchor.EraseAnchorAsync();
+
+                if (success)
+                {
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            $"[AprilTagSpatialAnchorManager] Successfully erased anchor for tag {tagId} from local device storage"
+                        );
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        $"[AprilTagSpatialAnchorManager] Failed to erase anchor for tag {tagId} from local device storage"
+                    );
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError(
+                    $"[AprilTagSpatialAnchorManager] Exception while erasing anchor for tag {tagId}: {e.Message}\n{e.StackTrace}"
+                );
+            }
+        }
+
+        /// <summary>
+        /// Remove a spatial anchor for a specific tag
+        /// Can be called from external scripts or via point-and-delete controller input
+        /// </summary>
+        public void RemoveAnchorForTag(int tagId)
         {
             if (m_anchorsById.TryGetValue(tagId, out var anchor))
             {
+                // Erase from local device storage if persistence is enabled
+                if (m_persistAnchors && anchor != null)
+                {
+                    EraseAnchorAsync(anchor, tagId);
+                }
+
                 if (anchor != null && anchor.gameObject != null)
                 {
                     DestroyImmediate(anchor.gameObject);
@@ -613,6 +857,12 @@ namespace AprilTag
                     Debug.Log(
                         $"[AprilTagSpatialAnchorManager] Removed spatial anchor for tag {tagId}"
                     );
+                }
+
+                // Update PlayerPrefs after removal
+                if (m_persistAnchors)
+                {
+                    SaveAnchorsToStorage();
                 }
 
                 // Fire event
@@ -701,6 +951,21 @@ namespace AprilTag
                 }
             }
 
+            // Erase tracked anchors from local device storage before destroying
+            if (m_persistAnchors)
+            {
+                var anchorsToErase = new List<OVRSpatialAnchor>(m_anchorsById.Values);
+                foreach (var anchor in anchorsToErase)
+                {
+                    if (anchor != null)
+                    {
+                        // Get tag ID for logging
+                        var tagId = m_anchorsById.FirstOrDefault(x => x.Value == anchor).Key;
+                        EraseAnchorAsync(anchor, tagId);
+                    }
+                }
+            }
+
             // Manually destroy all anchor GameObjects
             var anchorsToDestroy = new List<OVRSpatialAnchor>(m_anchorsById.Values);
 
@@ -740,6 +1005,20 @@ namespace AprilTag
             m_placementStates.Clear();
             m_keepOutZones.Clear();
 
+            // Clear PlayerPrefs storage
+            if (m_persistAnchors)
+            {
+                PlayerPrefs.DeleteKey("AprilTag_Anchors");
+                PlayerPrefs.Save();
+
+                if (m_enableDebugLogging)
+                {
+                    Debug.Log(
+                        "[AprilTagSpatialAnchorManager] Cleared anchor data from PlayerPrefs"
+                    );
+                }
+            }
+
             if (m_enableDebugLogging)
             {
                 Debug.Log(
@@ -759,21 +1038,145 @@ namespace AprilTag
         /// </summary>
         private void HandleClearAnchorsInput()
         {
-            // Check for A button press on right controller
-            var aButtonPressed = OVRInput.GetDown(OVRInput.Button.One, m_rightController);
+            // Check for X button press on right controller
+            var xButtonPressed = OVRInput.GetDown(OVRInput.Button.Three, m_rightController);
 
-            if (aButtonPressed && !m_lastAButtonState)
+            if (xButtonPressed && !m_lastXButtonState)
             {
                 if (m_enableDebugLogging)
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] A button pressed - clearing all anchors (currently tracking {m_anchorsById.Count} anchors)"
+                        $"[AprilTagSpatialAnchorManager] X button pressed - clearing all anchors (currently tracking {m_anchorsById.Count} anchors)"
                     );
                 }
                 ClearAllAnchors();
             }
 
-            m_lastAButtonState = aButtonPressed;
+            m_lastXButtonState = xButtonPressed;
+        }
+
+        /// <summary>
+        /// Handle Quest controller input for point-and-delete individual anchors
+        /// </summary>
+        private void HandlePointAndDeleteInput()
+        {
+            // Check for Y button press on right controller
+            var yButtonPressed = OVRInput.GetDown(OVRInput.Button.Four, m_rightController);
+
+            if (yButtonPressed && !m_lastYButtonState)
+            {
+                // Get the anchor the user is pointing at
+                var targetAnchor = FindAnchorByPointing();
+
+                if (targetAnchor.HasValue)
+                {
+                    var (tagId, anchor) = targetAnchor.Value;
+
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            $"[AprilTagSpatialAnchorManager] Y button pressed - deleting anchor for tag {tagId} at {anchor.transform.position}"
+                        );
+                    }
+
+                    RemoveAnchorForTag(tagId);
+                }
+                else
+                {
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            "[AprilTagSpatialAnchorManager] Y button pressed but no anchor in range or pointing direction"
+                        );
+                    }
+                }
+            }
+
+            m_lastYButtonState = yButtonPressed;
+        }
+
+        /// <summary>
+        /// Find the closest anchor that the user is pointing at with the right controller
+        /// </summary>
+        /// <returns>Tuple of (tagId, anchor) if found, null otherwise</returns>
+        private (int, OVRSpatialAnchor)? FindAnchorByPointing()
+        {
+            if (m_anchorsById.Count == 0)
+                return null;
+
+            // Get right controller position and forward direction
+            var controllerPosition = OVRInput.GetLocalControllerPosition(m_rightController);
+            var controllerRotation = OVRInput.GetLocalControllerRotation(m_rightController);
+            var controllerForward = controllerRotation * Vector3.forward;
+
+            // Convert from local to world space
+            var mainCamera = Camera.main;
+            if (mainCamera == null)
+            {
+                Debug.LogWarning(
+                    "[AprilTagSpatialAnchorManager] No main camera found for point-and-delete"
+                );
+                return null;
+            }
+
+            var worldControllerPosition = mainCamera.transform.TransformPoint(controllerPosition);
+            var worldControllerForward = mainCamera.transform.TransformDirection(controllerForward);
+
+            // Find the closest anchor within the pointing cone
+            float closestDistance = float.MaxValue;
+            int closestTagId = -1;
+            OVRSpatialAnchor closestAnchor = null;
+
+            foreach (var kvp in m_anchorsById)
+            {
+                var tagId = kvp.Key;
+                var anchor = kvp.Value;
+
+                if (anchor == null || anchor.gameObject == null)
+                    continue;
+
+                var anchorPosition = anchor.transform.position;
+
+                // Calculate distance to anchor
+                var toAnchor = anchorPosition - worldControllerPosition;
+                var distance = toAnchor.magnitude;
+
+                // Check if within max distance
+                if (distance > m_pointDeleteMaxDistance)
+                    continue;
+
+                // Calculate angle between controller forward and direction to anchor
+                var angle = Vector3.Angle(worldControllerForward, toAnchor.normalized);
+
+                // Check if within pointing cone
+                if (angle > m_pointDeleteMaxAngle)
+                    continue;
+
+                // Track closest anchor
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closestTagId = tagId;
+                    closestAnchor = anchor;
+                }
+            }
+
+            if (closestAnchor != null)
+            {
+                if (m_enableDebugLogging)
+                {
+                    Debug.Log(
+                        $"[AprilTagSpatialAnchorManager] Found anchor for tag {closestTagId} at distance {closestDistance:F2}m, angle: {Vector3.Angle(worldControllerForward, (closestAnchor.transform.position - worldControllerPosition).normalized):F1}°"
+                    );
+                }
+                
+                // Optional: Add visual feedback here (e.g., highlight the anchor)
+                // This could be done by changing the material color or scale temporarily
+                
+                return (closestTagId, closestAnchor);
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -823,8 +1226,23 @@ namespace AprilTag
         /// </summary>
         private void OnAnchorsLoaded(List<OVRSpatialAnchor> loadedAnchors)
         {
+            if (m_enableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] OnAnchorsLoaded callback triggered with {loadedAnchors.Count} anchors"
+                );
+            }
+
             foreach (var anchor in loadedAnchors)
             {
+                if (anchor == null)
+                {
+                    Debug.LogWarning(
+                        "[AprilTagSpatialAnchorManager] Loaded anchor is null, skipping"
+                    );
+                    continue;
+                }
+
                 // Find the tag ID for this anchor using the pending load data
                 var tagId = -1;
                 foreach (var kvp in m_pendingLoadData)
@@ -848,9 +1266,26 @@ namespace AprilTag
                     if (m_enableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Successfully loaded spatial anchor for tag {tagId} at {anchor.transform.position}"
+                            $"[AprilTagSpatialAnchorManager] Successfully loaded spatial anchor for tag {tagId} at {anchor.transform.position} (UUID: {anchor.Uuid})"
                         );
                     }
+
+                    // CRITICAL: Fire event so AprilTagController creates visualization
+                    // Without this, loaded anchors have no visible representation
+                    OnAnchorCreated?.Invoke(tagId, anchor);
+
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            $"[AprilTagSpatialAnchorManager] Fired OnAnchorCreated event for loaded tag {tagId}"
+                        );
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        $"[AprilTagSpatialAnchorManager] Could not find tag ID for loaded anchor UUID {anchor.Uuid}"
+                    );
                 }
             }
 

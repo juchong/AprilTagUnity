@@ -63,7 +63,7 @@ public class AprilTagController : MonoBehaviour
     // - This is your PRIMARY calibration tool for Quest deployment
     [Tooltip("Offset for corner-based positioning (primary method). Saves to PlayerPrefs. Adjustable at runtime with Quest controllers when configuration tool enabled.")]
     [SerializeField]
-    private Vector3 m_cornerPositionOffset = new(0.000f, 0.000f, 0.000f);
+    private Vector3 m_cornerPositionOffset = new(0.030f, 0.010f, 0.000f);
 
     [Tooltip("Save runtime offset to PlayerPrefs for persistence")]
     [SerializeField]
@@ -79,10 +79,6 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private Vector3 m_rotationOffset = Vector3.zero;
 
-    [Tooltip("Quest-specific: Use the center eye transform for better positioning")]
-    [SerializeField]
-    private bool m_useCenterEyeTransform = true;
-
     [Tooltip("Quest-specific: Use proper passthrough camera raycasting for accurate positioning")]
     [SerializeField]
     private bool m_usePassthroughRaycasting = true;
@@ -90,10 +86,6 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Environment raycast manager for accurate 3D positioning")]
     [SerializeField]
     private EnvironmentRaycastManager m_environmentRaycastManager;
-
-    [Tooltip("Ignore occlusion - visualizations will always be visible")]
-    [SerializeField]
-    private bool m_ignoreOcclusion = true;
 
     [Tooltip(
         "Scale factor to adjust tag positioning (1.0 = normal, 0.5 = half size, 2.0 = double size)"
@@ -121,19 +113,9 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private bool m_useImprovedIntrinsics = true;
 
-    [Tooltip(
-        "Make tags world-locked (rotation independent of headset movement) - inspired by PhotonVision's stable pose estimation"
-    )]
-    [SerializeField]
-    private bool m_worldLockedRotation = true;
-
     [Tooltip("Scale multiplier for tag visualization (1.0 = normal size)")]
     [SerializeField]
     private float m_visualizationScaleMultiplier = 1.0f;
-
-    [Tooltip("Test mode: Use identity rotation to see if positioning is correct")]
-    [SerializeField]
-    private bool m_testModeIdentityRotation = false;
 
     [Header("Detection")]
     [Tooltip("Tag family to detect. Tag36h11 is recommended for ArUcO compatibility.")]
@@ -402,7 +384,6 @@ public class AprilTagController : MonoBehaviour
     // Headset pose tracking for continuous adjustment
     private Quaternion m_lastHeadsetRotation = Quaternion.identity;
     private Vector3 m_lastHeadsetPosition = Vector3.zero;
-    private bool m_headsetPoseInitialized = false;
 
     // Detector (recreated when size/decimate changes)
     private TagDetector m_detector;
@@ -604,17 +585,89 @@ public class AprilTagController : MonoBehaviour
             );
             confidenceField?.SetValue(m_spatialAnchorManager, m_anchorConfidenceThreshold);
 
+            // CRITICAL: Subscribe to anchor events for visualization
+            // This allows us to create visualizations for loaded anchors on startup
+            AprilTagSpatialAnchorManager.OnAnchorCreated += OnSpatialAnchorCreated;
+
             if (m_enableAllDebugLogging)
             {
                 Debug.Log(
                     $"[AprilTag] Spatial anchor manager initialized with confidence threshold: {m_anchorConfidenceThreshold}"
                 );
+                Debug.Log("[AprilTag] Subscribed to OnAnchorCreated event for visualizations");
             }
+        }
+    }
+
+    /// <summary>
+    /// Handle spatial anchor creation/loading - creates visualization for the anchor
+    /// </summary>
+    private void OnSpatialAnchorCreated(int tagId, OVRSpatialAnchor anchor)
+    {
+        if (anchor == null || anchor.gameObject == null)
+        {
+            Debug.LogWarning($"[AprilTag] OnSpatialAnchorCreated called with null anchor for tag {tagId}");
+            return;
+        }
+
+        if (m_enableAllDebugLogging)
+        {
+            Debug.Log(
+                $"[AprilTag] OnSpatialAnchorCreated event received for tag {tagId} at position {anchor.transform.position}"
+            );
+        }
+
+        // Check if visualization already exists
+        if (m_vizById.ContainsKey(tagId))
+        {
+            if (m_enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Visualization already exists for tag {tagId}, skipping creation");
+            }
+            return;
+        }
+
+        // Create visualization for the anchor
+        if (!m_tagVizPrefab)
+        {
+            Debug.LogWarning(
+                $"[AprilTag] No tag visualization prefab assigned! Cannot create visualization for loaded anchor tag {tagId}"
+            );
+            return;
+        }
+
+        // Instantiate visualization
+        var vizTransform = Instantiate(m_tagVizPrefab).transform;
+        vizTransform.name = $"AprilTag_{tagId}_Loaded";
+
+        // Configure visualization to ignore occlusion
+        if (m_visualizationHelper != null)
+        {
+            m_visualizationHelper.ConfigureVisualizationForNoOcclusion(vizTransform);
+        }
+
+        // Parent the visualization to the anchor so it moves with it
+        vizTransform.SetParent(anchor.transform, false);
+        vizTransform.localPosition = Vector3.zero;
+        vizTransform.localRotation = Quaternion.identity;
+        vizTransform.localScale = Vector3.one * m_visualizationScaleMultiplier;
+
+        // Track the visualization
+        m_vizById[tagId] = vizTransform;
+
+        if (m_enableAllDebugLogging)
+        {
+            Debug.Log(
+                $"[AprilTag] Created visualization for loaded anchor tag {tagId} at {anchor.transform.position}"
+            );
         }
     }
 
     private void OnDestroy()
     {
+        // Unsubscribe from events
+        AprilTagSpatialAnchorManager.OnAnchorCreated -= OnSpatialAnchorCreated;
+        
         // Dispose detector resources
         DisposeDetector();
 
