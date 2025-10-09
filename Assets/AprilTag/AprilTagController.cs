@@ -198,7 +198,7 @@ public class AprilTagController : MonoBehaviour
     /// </summary>
     public EnvironmentRaycastManager EnvironmentRaycastManager => m_environmentRaycastManager;
 
-    [Header("GPU Preprocessing")]
+    [Header("GPU Preprocessing Settings")]
     [Tooltip("Enable GPU-accelerated image preprocessing for better detection quality")]
     [SerializeField]
     private bool m_enableGPUPreprocessing = true; // Fixed and re-enabled
@@ -210,6 +210,35 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Save preprocessed image for debugging (creates AprilTag_Debug.png in project root)")]
     [SerializeField]
     private bool m_debugSavePreprocessedImage = false;
+
+    [Tooltip("Maximum image width allowed for GPU processing (to prevent crashes)")]
+    [SerializeField]
+    private int m_gpuMaxImageWidth = 1280;
+
+    [Tooltip("Maximum image height allowed for GPU processing (to prevent crashes)")]
+    [SerializeField]
+    private int m_gpuMaxImageHeight = 960;
+
+    [Tooltip("Path to the main preprocessing compute shader (relative to Resources folder)")]
+    [SerializeField]
+    private string m_preprocessorShaderPath = "AprilTagPreprocessor";
+
+    [Tooltip("Path to the histogram compute shader (relative to Resources folder)")]
+    [SerializeField]
+    private string m_histogramShaderPath = "AprilTagHistogram";
+
+    [Header("Debug Logging Intervals")]
+    [Tooltip("Frame interval for periodic debug logs (e.g., 60 = every second at 60fps)")]
+    [SerializeField]
+    private int m_debugLogInterval = 60;
+
+    [Tooltip("Frame interval for verbose debug logs (e.g., 300 = every 5 seconds at 60fps)")]
+    [SerializeField]
+    private int m_verboseDebugLogInterval = 300;
+
+    [Tooltip("Frame interval for corner quality logs (e.g., 180 = every 3 seconds at 60fps)")]
+    [SerializeField]
+    private int m_cornerQualityLogInterval = 180;
 
     [Header("PhotonVision-Inspired Filtering")]
     [Tooltip("Enable pose smoothing filter (reduces jitter)")]
@@ -248,6 +277,39 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private float m_minCornerQuality = 0.3f;
 
+    [Header("Corner Quality Thresholds")]
+    [Tooltip("Minimum side length in pixels (smaller tags are likely false detections)")]
+    [SerializeField]
+    private float m_minCornerSideLength = 5.0f;
+
+    [Tooltip("Maximum side length in pixels (larger tags are likely false detections)")]
+    [SerializeField]
+    private float m_maxCornerSideLength = 500.0f;
+
+    [Tooltip("Maximum aspect ratio for tag detection (tags should be roughly square)")]
+    [SerializeField]
+    private float m_maxAspectRatio = 3.0f;
+
+    [Tooltip("Maximum angle deviation from 90 degrees for corners")]
+    [SerializeField]
+    private float m_maxCornerAngleDeviation = 30.0f;
+
+    [Tooltip("Quality penalty for small tags")]
+    [SerializeField]
+    private float m_smallTagQualityPenalty = 0.3f;
+
+    [Tooltip("Quality penalty for large tags")]
+    [SerializeField]
+    private float m_largeTagQualityPenalty = 0.5f;
+
+    [Tooltip("Quality penalty for elongated tags")]
+    [SerializeField]
+    private float m_elongatedTagQualityPenalty = 0.4f;
+
+    [Tooltip("Quality penalty for non-convex tags")]
+    [SerializeField]
+    private float m_nonConvexQualityPenalty = 0.3f;
+
     [Header("Spatial Anchors")]
     [Tooltip("Enable spatial anchor creation for detected tags")]
     [SerializeField]
@@ -261,6 +323,33 @@ public class AprilTagController : MonoBehaviour
     [Range(0.0f, 1.0f)]
     [SerializeField]
     private float m_anchorConfidenceThreshold = 0.1f; // Lowered to allow low-confidence tags
+
+    [Header("Validation Time Thresholds")]
+    [Tooltip("Time window for considering detections as recent (seconds)")]
+    [SerializeField]
+    private float m_validationRecentDetectionTime = 1.0f;
+
+    [Tooltip("Confidence value for single detections")]
+    [Range(0.0f, 1.0f)]
+    [SerializeField]
+    private float m_singleDetectionConfidence = 0.5f;
+
+    [Tooltip("Distance-based quality decay factor")]
+    [SerializeField]
+    private float m_distanceQualityDecayFactor = 0.01f;
+
+    [Tooltip("Stability confidence decay factor (per second)")]
+    [SerializeField]
+    private float m_stabilityDecayFactor = 0.01f;
+
+    [Tooltip("Minimum confidence threshold")]
+    [Range(0.0f, 1.0f)]
+    [SerializeField]
+    private float m_minimumConfidenceThreshold = 0.1f;
+
+    [Tooltip("Runtime calibration step size")]
+    [SerializeField]
+    private float m_runtimeCalibrationStep = 0.01f;
 
     // CPU buffers
     private Color32[] m_rgba;
@@ -522,7 +611,7 @@ public class AprilTagController : MonoBehaviour
         if (!AprilTagPermissionsManager.HasAllPermissions)
         {
             // Only log this warning occasionally to avoid spam
-            if (m_enableAllDebugLogging && Time.frameCount % 300 == 0)
+            if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
             {
                 Debug.LogWarning("[AprilTag] Waiting for required permissions to be granted");
             }
@@ -602,7 +691,11 @@ public class AprilTagController : MonoBehaviour
                 m_gpuPreprocessor = new AprilTagGPUPreprocessor(
                     wct.width,
                     wct.height,
-                    m_gpuPreprocessingSettings
+                    m_gpuPreprocessingSettings,
+                    m_gpuMaxImageWidth,
+                    m_gpuMaxImageHeight,
+                    m_preprocessorShaderPath,
+                    m_histogramShaderPath
                 );
 
                 if (m_gpuPreprocessor.IsInitialized)
@@ -643,7 +736,7 @@ public class AprilTagController : MonoBehaviour
                             var expectedPixels = wct.width * wct.height;
                             if (m_rgba.Length == expectedPixels)
                             {
-                                if (m_enableAllDebugLogging && Time.frameCount % 60 == 0)
+                                if (m_enableAllDebugLogging && Time.frameCount % m_debugLogInterval == 0)
                                 {
                                     Debug.Log(
                                         $"[AprilTag] GPU preprocessing completed in {m_gpuPreprocessor.LastProcessingTimeMs:F2}ms, processed {m_rgba.Length} pixels"
@@ -651,7 +744,7 @@ public class AprilTagController : MonoBehaviour
                                 }
 
                                 // Debug: Save preprocessed image
-                                if (m_debugSavePreprocessedImage && Time.frameCount % 300 == 0) // Every 5 seconds
+                                if (m_debugSavePreprocessedImage && Time.frameCount % m_verboseDebugLogInterval == 0)
                                 {
                                     SaveDebugImage(m_rgba, m_detW, m_detH);
                                 }
@@ -705,14 +798,14 @@ public class AprilTagController : MonoBehaviour
 
             if (m_rgba == null || m_rgba.Length == 0)
             {
-                if (m_enableAllDebugLogging && Time.frameCount % 300 == 0)
+                if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
                     Debug.LogWarning("[AprilTag] No pixel data available");
                 return;
             }
         }
         catch (Exception ex)
         {
-            if (m_enableAllDebugLogging && Time.frameCount % 300 == 0)
+            if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
                 Debug.LogWarning($"[AprilTag] Failed to get pixels: {ex.Message}");
             return;
         }
@@ -723,7 +816,7 @@ public class AprilTagController : MonoBehaviour
         m_detector.ProcessImage(m_rgba.AsSpan(), m_horizontalFovDeg, m_tagSizeMeters);
 
         // Debug logging for detection count
-        if (Time.frameCount % 60 == 0) // Log every second regardless of enableAllDebugLogging
+        if (Time.frameCount % m_debugLogInterval == 0) // Log periodically regardless of enableAllDebugLogging
         {
             var tagCount = m_detector.DetectedTags?.Count() ?? 0;
             if (tagCount == 0)
@@ -733,7 +826,7 @@ public class AprilTagController : MonoBehaviour
                 );
 
                 // Additional debug info
-                if (Time.frameCount % 300 == 0) // Every 5 seconds
+                if (Time.frameCount % m_verboseDebugLogInterval == 0)
                 {
                     Debug.Log(
                         $"[AprilTag] Detection params: Family={m_tagFamily}, MaxDetections/sec={m_maxDetectionsPerSecond}"
@@ -831,7 +924,7 @@ public class AprilTagController : MonoBehaviour
             {
                 if (!m_tagVizPrefab)
                 {
-                    if (m_enableAllDebugLogging && Time.frameCount % 300 == 0)
+                    if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
                     {
                         Debug.LogWarning(
                             $"[AprilTag] No tag visualization prefab assigned! Cannot create visualization for tag {t.ID}"
@@ -1047,7 +1140,7 @@ public class AprilTagController : MonoBehaviour
         if (!m_enableSpatialAnchors || m_spatialAnchorManager == null)
             return;
 
-        if (m_enableAllDebugLogging && Time.frameCount % 60 == 0) // Log every 60 frames (1 second at 60fps)
+        if (m_enableAllDebugLogging && Time.frameCount % m_debugLogInterval == 0)
         {
             Debug.Log(
                 $"[AprilTag] ProcessSpatialAnchors: Processing {m_detector.DetectedTags.Count()} detected tags"
@@ -1131,7 +1224,7 @@ public class AprilTagController : MonoBehaviour
         {
             // Use a simplified corner quality calculation
             // In a real implementation, you might want to access actual corner quality data
-            var cornerQuality = Mathf.Clamp01(1.0f - tag.Position.magnitude * 0.01f); // Much gentler distance-based quality
+            var cornerQuality = Mathf.Clamp01(1.0f - tag.Position.magnitude * m_distanceQualityDecayFactor); // Distance-based quality
             confidence *= cornerQuality;
 
             if (m_enableAllDebugLogging)
@@ -1163,7 +1256,7 @@ public class AprilTagController : MonoBehaviour
             {
                 // Higher confidence for more stable poses - much gentler decay
                 var stabilityConfidence = Mathf.Clamp01(
-                    1.0f - (Time.time - filteredPose.LastUpdateTime) * 0.01f
+                    1.0f - (Time.time - filteredPose.LastUpdateTime) * m_stabilityDecayFactor
                 );
                 confidence *= stabilityConfidence;
 
@@ -1178,9 +1271,9 @@ public class AprilTagController : MonoBehaviour
 
         // Ensure minimum confidence to prevent 0.0f values
         var finalConfidence = Mathf.Clamp01(confidence);
-        if (finalConfidence < 0.1f) // Minimum 10% confidence
+        if (finalConfidence < m_minimumConfidenceThreshold)
         {
-            finalConfidence = 0.1f;
+            finalConfidence = m_minimumConfidenceThreshold;
             if (m_enableAllDebugLogging)
             {
                 Debug.LogWarning(
@@ -1198,11 +1291,11 @@ public class AprilTagController : MonoBehaviour
     private float CalculateValidationConfidence(Queue<TagDetectionHistory> history)
     {
         if (history.Count < 2)
-            return 0.5f; // Low confidence for single detections
+            return m_singleDetectionConfidence; // Confidence for single detections
 
         var recentDetections = history.Take(m_validationFrameCount).ToList();
         if (recentDetections.Count < 2)
-            return 0.5f;
+            return m_singleDetectionConfidence;
 
         // Calculate position consistency
         var positionVariance = 0f;
@@ -1287,155 +1380,6 @@ public class AprilTagController : MonoBehaviour
         }
     }
 
-    [ContextMenu("Reset Position Offsets")]
-    public void ResetPositionOffsets()
-    {
-        m_positionOffset = Vector3.zero;
-        m_rotationOffset = Vector3.zero;
-        Debug.Log("[AprilTag] Position and rotation offsets reset to zero");
-    }
-
-    [ContextMenu("Log Current Camera Info")]
-    public void LogCurrentCameraInfo()
-    {
-        var cam = GetCorrectCameraReference();
-        Debug.Log($"[AprilTag] Current reference camera: {cam.name}");
-        Debug.Log($"[AprilTag] Camera position: {cam.position}");
-        Debug.Log($"[AprilTag] Camera rotation: {cam.rotation.eulerAngles}");
-        Debug.Log($"[AprilTag] Position offset: {m_positionOffset}");
-        Debug.Log($"[AprilTag] Rotation offset: {m_rotationOffset}");
-        Debug.Log($"[AprilTag] Use center eye transform: {m_useCenterEyeTransform}");
-
-        // Log Quest-specific information
-        if (m_webCamManager != null)
-        {
-            var managerType = m_webCamManager.GetType();
-            var eyeField = managerType.GetField(
-                "Eye",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-            );
-            if (eyeField != null)
-            {
-                var eye = eyeField.GetValue(m_webCamManager);
-                Debug.Log($"[AprilTag] WebCam manager eye: {eye}");
-            }
-        }
-    }
-
-    [ContextMenu("Setup Environment Raycast Manager")]
-    public void SetupEnvironmentRaycastManager()
-    {
-        if (m_environmentRaycastManager == null)
-        {
-            m_environmentRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
-            if (m_environmentRaycastManager != null)
-            {
-                Debug.Log(
-                    $"[AprilTag] Found and assigned EnvironmentRaycastManager: {m_environmentRaycastManager.name}"
-                );
-            }
-            else
-            {
-                Debug.LogWarning(
-                    "[AprilTag] No EnvironmentRaycastManager found in scene. Please add one from the MultiObjectDetection sample or disable usePassthroughRaycasting."
-                );
-            }
-        }
-        else
-        {
-            Debug.Log(
-                $"[AprilTag] EnvironmentRaycastManager already assigned: {m_environmentRaycastManager.name}"
-            );
-        }
-    }
-
-    [ContextMenu("Calibrate Position Scale")]
-    public void CalibratePositionScale()
-    {
-        Debug.Log("[AprilTag] Position Scale Calibration Helper");
-        Debug.Log($"Current position scale factor: {m_positionScaleFactor}");
-        Debug.Log("Try these values to fix scaling issues:");
-        Debug.Log("  - If tags appear too far apart: Try 0.5 or 0.25");
-        Debug.Log("  - If tags appear too close together: Try 2.0 or 4.0");
-        Debug.Log("  - If tags appear at wrong distance: Try 0.1 to 10.0");
-        Debug.Log("Adjust the 'Position Scale Factor' in the inspector and test with your tags.");
-    }
-
-    [ContextMenu("Set Scale Factor 0.5")]
-    public void SetScaleFactorHalf()
-    {
-        m_positionScaleFactor = 0.5f;
-        Debug.Log("[AprilTag] Position scale factor set to 0.5 (half size)");
-    }
-
-    [ContextMenu("Set Scale Factor 2.0")]
-    public void SetScaleFactorDouble()
-    {
-        m_positionScaleFactor = 2.0f;
-        Debug.Log("[AprilTag] Position scale factor set to 2.0 (double size)");
-    }
-
-    [ContextMenu("Reset Scale Factor")]
-    public void ResetScaleFactor()
-    {
-        m_positionScaleFactor = 1.0f;
-        Debug.Log("[AprilTag] Position scale factor reset to 1.0 (normal size)");
-    }
-
-    [ContextMenu("Set Range 0.5-18m")]
-    public void SetWideRange()
-    {
-        m_minDetectionDistance = 0.5f;
-        m_maxDetectionDistance = 18.0f;
-        m_enableDistanceScaling = true;
-        Debug.Log("[AprilTag] Detection range set to 0.5m - 18m with distance scaling enabled");
-    }
-
-    [ContextMenu("Set Range 1-10m")]
-    public void SetMediumRange()
-    {
-        m_minDetectionDistance = 1.0f;
-        m_maxDetectionDistance = 10.0f;
-        m_enableDistanceScaling = true;
-        Debug.Log("[AprilTag] Detection range set to 1m - 10m with distance scaling enabled");
-    }
-
-    [ContextMenu("Disable Distance Scaling")]
-    public void DisableDistanceScaling()
-    {
-        m_enableDistanceScaling = false;
-        Debug.Log("[AprilTag] Distance scaling disabled - using raw distances");
-    }
-
-    [ContextMenu("Enable Distance Scaling")]
-    public void EnableDistanceScaling()
-    {
-        m_enableDistanceScaling = true;
-        Debug.Log("[AprilTag] Distance scaling enabled");
-    }
-
-    [ContextMenu("Debug Headset Movement")]
-    public void DebugHeadsetMovement()
-    {
-        var cam = GetCorrectCameraReference();
-        Debug.Log($"[AprilTag] Headset Debug Info:");
-        Debug.Log($"  - Camera Transform: {cam.name}");
-        Debug.Log($"  - Camera Position: {cam.position:F3}");
-        Debug.Log($"  - Camera Rotation: {cam.eulerAngles:F1}");
-        Debug.Log($"  - Camera Forward: {cam.forward:F3}");
-        Debug.Log($"  - Camera Right: {cam.right:F3}");
-        Debug.Log($"  - Camera Up: {cam.up:F3}");
-        Debug.Log($"  - Coordinate Correction: Disabled (removed to fix headset movement issues)");
-        Debug.Log($"  - Use Passthrough Raycasting: {m_usePassthroughRaycasting}");
-
-        if (cam.GetComponent<Camera>() != null)
-        {
-            var camera = cam.GetComponent<Camera>();
-            Debug.Log($"  - Camera FOV: {camera.fieldOfView:F1}");
-            Debug.Log($"  - Camera Near: {camera.nearClipPlane:F3}");
-            Debug.Log($"  - Camera Far: {camera.farClipPlane:F3}");
-        }
-    }
 
     // Quest-compatible debugging methods
     public void ToggleDistanceScalingRuntime()
@@ -1480,11 +1424,11 @@ public class AprilTagController : MonoBehaviour
             {
                 if (rightGripHeld)
                 {
-                    m_cornerPositionOffset += new Vector3(-0.01f, 0f, 0f); // Move left
+                    m_cornerPositionOffset += new Vector3(-m_runtimeCalibrationStep, 0f, 0f); // Move left
                 }
                 else
                 {
-                    m_cornerPositionOffset += new Vector3(0.01f, 0f, 0f); // Move right
+                    m_cornerPositionOffset += new Vector3(m_runtimeCalibrationStep, 0f, 0f); // Move right
                 }
                 SaveRuntimeOffset();
                 Debug.Log(
@@ -1497,11 +1441,11 @@ public class AprilTagController : MonoBehaviour
             {
                 if (rightGripHeld)
                 {
-                    m_cornerPositionOffset += new Vector3(0f, -0.01f, 0f); // Move down
+                    m_cornerPositionOffset += new Vector3(0f, -m_runtimeCalibrationStep, 0f); // Move down
                 }
                 else
                 {
-                    m_cornerPositionOffset += new Vector3(0f, 0.01f, 0f); // Move up
+                    m_cornerPositionOffset += new Vector3(0f, m_runtimeCalibrationStep, 0f); // Move up
                 }
                 SaveRuntimeOffset();
                 Debug.Log(
@@ -1511,22 +1455,12 @@ public class AprilTagController : MonoBehaviour
         }
 
         // Log the current settings every 5 seconds when debugging is enabled
-        if (m_enableAllDebugLogging && Time.frameCount % 300 == 0) // Every 5 seconds at 60fps
+        if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
         {
             LogCurrentSettings();
         }
     }
 
-    private void ResetDebugSettings()
-    {
-        m_enableAllDebugLogging = true;
-        m_usePassthroughRaycasting = true;
-        m_useImprovedIntrinsics = false;
-        m_testModeIdentityRotation = false;
-        m_worldLockedRotation = true;
-        m_visualizationScaleMultiplier = 1.0f;
-        Debug.Log("[AprilTag] Debug settings reset to defaults");
-    }
 
     // PhotonVision-inspired pose filtering implementation
     // Based on PhotonVision's temporal filtering approach for stable pose estimation
@@ -1553,7 +1487,7 @@ public class AprilTagController : MonoBehaviour
         // Apply exponential smoothing
         var filteredPosition = Vector3.Lerp(rawPosition, previousPosition, smoothingFactor);
 
-        if (m_enableAllDebugLogging && Time.frameCount % 300 == 0)
+        if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
         {
             Debug.Log(
                 $"[AprilTag] Position Filter - Raw: {rawPosition:F3}, Filtered: {filteredPosition:F3}, Factor: {smoothingFactor:F3}"
@@ -1631,7 +1565,7 @@ public class AprilTagController : MonoBehaviour
 
         foreach (var detection in history)
         {
-            if (detection.IsValid && (Time.time - detection.Timestamp) < 1.0f) // Only use recent detections
+            if (detection.IsValid && (Time.time - detection.Timestamp) < m_validationRecentDetectionTime) // Only use recent detections
             {
                 avgPosition += detection.Position;
                 avgEulerAngles += detection.Rotation.eulerAngles;
@@ -1718,21 +1652,21 @@ public class AprilTagController : MonoBehaviour
         var minSide = Mathf.Min(sideLengths);
         var maxSide = Mathf.Max(sideLengths);
 
-        if (minSide < 5.0f) // Too small in pixels
+        if (minSide < m_minCornerSideLength) // Too small in pixels
         {
-            quality *= 0.3f;
+            quality *= m_smallTagQualityPenalty;
         }
 
-        if (maxSide > 500.0f) // Too large, likely false detection
+        if (maxSide > m_maxCornerSideLength) // Too large, likely false detection
         {
-            quality *= 0.5f;
+            quality *= m_largeTagQualityPenalty;
         }
 
         // Check aspect ratio consistency (should be roughly square for AprilTags)
         var aspectRatio = maxSide / Mathf.Max(minSide, 0.1f);
-        if (aspectRatio > 3.0f) // Too elongated
+        if (aspectRatio > m_maxAspectRatio) // Too elongated
         {
-            quality *= 0.4f;
+            quality *= m_elongatedTagQualityPenalty;
         }
 
         // Check corner angles (should be close to 90 degrees for AprilTags)
@@ -1752,9 +1686,9 @@ public class AprilTagController : MonoBehaviour
         }
 
         var avgAngleDeviation = totalAngleDeviation / 4f;
-        if (avgAngleDeviation > 30f) // Corners too far from 90 degrees
+        if (avgAngleDeviation > m_maxCornerAngleDeviation) // Corners too far from 90 degrees
         {
-            quality *= Mathf.Lerp(1.0f, 0.2f, (avgAngleDeviation - 30f) / 60f);
+            quality *= Mathf.Lerp(1.0f, 0.2f, (avgAngleDeviation - m_maxCornerAngleDeviation) / (m_maxCornerAngleDeviation * 2f));
         }
 
         // Check for convexity (corners should form a convex quadrilateral)
@@ -1780,13 +1714,13 @@ public class AprilTagController : MonoBehaviour
 
         if (!isConvex)
         {
-            quality *= 0.3f;
+            quality *= m_nonConvexQualityPenalty;
         }
 
         // Clamp quality to valid range
         quality = Mathf.Clamp01(quality);
 
-        if (m_enableAllDebugLogging && Time.frameCount % 180 == 0) // Log every 3 seconds
+        if (m_enableAllDebugLogging && Time.frameCount % m_cornerQualityLogInterval == 0)
         {
             Debug.Log(
                 $"[AprilTag] Corner Quality Assessment - Quality: {quality:F3}, AspectRatio: {aspectRatio:F2}, AngleDeviation: {avgAngleDeviation:F1}°, Convex: {isConvex}"
@@ -1796,13 +1730,6 @@ public class AprilTagController : MonoBehaviour
         return quality;
     }
 
-    private void ResetHeadsetPoseTracking()
-    {
-        // Reset headset pose tracking - useful when the headset pose is reset
-        m_headsetPoseInitialized = false;
-        m_lastHeadsetRotation = Quaternion.identity;
-        m_lastHeadsetPosition = Vector3.zero;
-    }
 
     private void SaveRuntimeOffset()
     {

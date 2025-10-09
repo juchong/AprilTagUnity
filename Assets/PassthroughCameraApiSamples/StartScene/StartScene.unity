@@ -197,6 +197,13 @@ MonoBehaviour:
     EnableDownsampling: 0
     DownsampleFactor: 0.5
   m_debugSavePreprocessedImage: 0
+  m_gpuMaxImageWidth: 1280
+  m_gpuMaxImageHeight: 960
+  m_debugLogInterval: 60
+  m_verboseDebugLogInterval: 300
+  m_cornerQualityLogInterval: 180
+  m_preprocessorShaderPath: AprilTagPreprocessor
+  m_histogramShaderPath: AprilTagHistogram
   m_enablePoseSmoothing: 1
   m_positionSmoothingTime: 0.1
   m_rotationSmoothingTime: 0.15
@@ -204,11 +211,25 @@ MonoBehaviour:
   m_validationFrameCount: 3
   m_maxPositionDeviation: 0.2
   m_maxRotationDeviation: 30
-  m_enableCornerQualityAssessment: 1
+  m_enableCornerQualityAssessment: 0
   m_minCornerQuality: 0.3
+  m_minCornerSideLength: 5
+  m_maxCornerSideLength: 500
+  m_maxAspectRatio: 3
+  m_maxCornerAngleDeviation: 30
+  m_smallTagQualityPenalty: 0.3
+  m_largeTagQualityPenalty: 0.5
+  m_elongatedTagQualityPenalty: 0.4
+  m_nonConvexQualityPenalty: 0.3
   m_enableSpatialAnchors: 1
   m_spatialAnchorManager: {fileID: 1220006292}
   m_anchorConfidenceThreshold: 0.1
+  m_validationRecentDetectionTime: 1
+  m_singleDetectionConfidence: 0.5
+  m_distanceQualityDecayFactor: 0.01
+  m_stabilityDecayFactor: 0.01
+  m_minimumConfidenceThreshold: 0.1
+  m_runtimeCalibrationStep: 0.01
 --- !u!4 &92805405
 Transform:
   m_ObjectHideFlags: 0
@@ -946,7 +967,7 @@ MonoBehaviour:
   requestBodyTrackingPermissionOnStartup: 0
   requestFaceTrackingPermissionOnStartup: 0
   requestEyeTrackingPermissionOnStartup: 0
-  requestScenePermissionOnStartup: 0
+  requestScenePermissionOnStartup: 1
   requestRecordAudioPermissionOnStartup: 0
   _localDimming: 1
   _trackingOriginType: 1
@@ -1072,19 +1093,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4abdb0d1226869740a8dc89f48c695eb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_enableSpatialAnchors: 1
-  m_minConfidenceThreshold: 0.3
-  m_requiredStableFrames: 2
-  m_maxDetectionTimeout: 30
-  m_persistAnchors: 1
-  m_spatialAnchorCore: {fileID: 374189999}
-  m_anchorPrefab: {fileID: 0}
-  m_enableKeepOutZone: 1
-  m_keepOutZoneMultiplier: 0.3
-  m_minKeepOutRadius: 0.02
-  m_maxKeepOutRadius: 0.1
-  m_enableClearAnchorsInput: 1
-  m_enableDebugLogging: 1
 --- !u!4 &1220006293
 Transform:
   m_ObjectHideFlags: 0

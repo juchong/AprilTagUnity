@@ -96,6 +96,14 @@ namespace AprilTag
         private int m_width;
         private int m_height;
 
+        // Safety limits
+        private int m_maxImageWidth;
+        private int m_maxImageHeight;
+
+        // Shader paths
+        private string m_preprocessorShaderPath;
+        private string m_histogramShaderPath;
+
         // Performance tracking
         private float _lastProcessingTime;
         private bool _isInitialized;
@@ -104,11 +112,18 @@ namespace AprilTag
         public float LastProcessingTimeMs => _lastProcessingTime;
         public bool IsInitialized => _isInitialized;
 
-        public AprilTagGPUPreprocessor(int width, int height, PreprocessingSettings settings = null)
+        public AprilTagGPUPreprocessor(int width, int height, PreprocessingSettings settings = null, 
+            int maxWidth = 1920, int maxHeight = 1080,
+            string preprocessorShaderPath = "AprilTagPreprocessor",
+            string histogramShaderPath = "AprilTagHistogram")
         {
             m_width = width;
             m_height = height;
             m_settings = settings ?? new PreprocessingSettings();
+            m_maxImageWidth = maxWidth;
+            m_maxImageHeight = maxHeight;
+            m_preprocessorShaderPath = preprocessorShaderPath;
+            m_histogramShaderPath = histogramShaderPath;
 
             Initialize();
         }
@@ -118,13 +133,13 @@ namespace AprilTag
             try
             {
                 // Load compute shaders
-                m_preprocessorShader = Resources.Load<ComputeShader>("AprilTagPreprocessor");
-                m_histogramShader = Resources.Load<ComputeShader>("AprilTagHistogram");
+                m_preprocessorShader = Resources.Load<ComputeShader>(m_preprocessorShaderPath);
+                m_histogramShader = Resources.Load<ComputeShader>(m_histogramShaderPath);
 
                 if (m_preprocessorShader == null)
                 {
                     Debug.LogError(
-                        "[AprilTagGPUPreprocessor] Failed to load AprilTagPreprocessor compute shader! Make sure Assets/AprilTag/Resources/AprilTagPreprocessor.compute exists."
+                        $"[AprilTagGPUPreprocessor] Failed to load preprocessing compute shader! Make sure Assets/AprilTag/Resources/{m_preprocessorShaderPath}.compute exists."
                     );
                     _isInitialized = false;
                     return;
@@ -133,7 +148,7 @@ namespace AprilTag
                 if (m_histogramShader == null)
                 {
                     Debug.LogError(
-                        "[AprilTagGPUPreprocessor] Failed to load AprilTagHistogram compute shader! Make sure Assets/AprilTag/Resources/AprilTagHistogram.compute exists."
+                        $"[AprilTagGPUPreprocessor] Failed to load histogram compute shader! Make sure Assets/AprilTag/Resources/{m_histogramShaderPath}.compute exists."
                     );
                     _isInitialized = false;
                     return;
@@ -291,10 +306,10 @@ namespace AprilTag
             }
 
             // Safety check for large images that might cause crashes
-            if (source.width > 1920 || source.height > 1080)
+            if (source.width > m_maxImageWidth || source.height > m_maxImageHeight)
             {
                 Debug.LogWarning(
-                    $"[AprilTagGPUPreprocessor] Image too large for GPU processing: {source.width}x{source.height}. Skipping preprocessing."
+                    $"[AprilTagGPUPreprocessor] Image too large for GPU processing: {source.width}x{source.height} exceeds limits ({m_maxImageWidth}x{m_maxImageHeight}). Skipping preprocessing."
                 );
                 return null;
             }
