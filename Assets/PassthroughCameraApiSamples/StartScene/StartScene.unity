@@ -168,14 +168,14 @@ MonoBehaviour:
   m_maxDetectionDistance: 15
   m_enableDistanceScaling: 1
   m_enableQuestDebugging: 1
-  m_useImprovedIntrinsics: 0
+  m_useImprovedIntrinsics: 1
   m_worldLockedRotation: 1
   m_visualizationScaleMultiplier: 1
   m_testModeIdentityRotation: 0
   m_tagFamily: 1
   m_tagSizeMeters: 0.165
-  m_decimate: 2
-  m_maxDetectionsPerSecond: 72
+  m_decimate: 4
+  m_maxDetectionsPerSecond: 120
   m_horizontalFovDeg: 78
   m_enablePositionOffset: 1
   m_enableRotationOffset: 1
@@ -184,26 +184,30 @@ MonoBehaviour:
   m_enableGPUPreprocessing: 1
   m_gpuPreprocessingSettings:
     EnableAdaptiveThreshold: 0
-    AdaptiveBlockSize: 11
-    AdaptiveConstant: 2
+    AdaptiveBlockSize: 10
+    AdaptiveConstant: -3.19
     EnableHistogramEqualization: 1
-    HistogramStrength: 0.7
+    HistogramStrength: 0.4
     EnableNoiseReduction: 1
-    BlurRadius: 2
-    BlurSigma: 1
+    BlurRadius: 1
+    BlurSigma: 0.5
     EnableEdgeEnhancement: 0
-    EdgeStrength: 0.3
+    EdgeStrength: 0.8
     UseHalfPrecision: 1
     EnableDownsampling: 0
     DownsampleFactor: 0.5
-  m_debugSavePreprocessedImage: 0
+  m_debugSavePreprocessedImage: 1
+  m_debugIncludeDetectionOverlay: 0
+  m_debugImageSaveInterval: 100
+  m_maxDebugImages: 10
+  m_debugSaveBothRawAndProcessed: 0
   m_gpuMaxImageWidth: 1280
-  m_gpuMaxImageHeight: 960
-  m_debugLogInterval: 60
-  m_verboseDebugLogInterval: 300
-  m_cornerQualityLogInterval: 180
+  m_gpuMaxImageHeight: 1280
   m_preprocessorShaderPath: AprilTagPreprocessor
   m_histogramShaderPath: AprilTagHistogram
+  m_debugLogInterval: 60
+  m_verboseDebugLogInterval: 100
+  m_cornerQualityLogInterval: 180
   m_enablePoseSmoothing: 1
   m_positionSmoothingTime: 0.1
   m_rotationSmoothingTime: 0.15

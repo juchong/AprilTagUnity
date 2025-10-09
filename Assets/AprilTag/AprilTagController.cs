@@ -129,7 +129,7 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Downscale factor for detection (1 = full res, 2 = half, etc.).")]
     [Range(1, 8)]
     [SerializeField]
-    private int m_decimate = 2;
+    private int m_decimate = 4;
 
     [Tooltip("Max detection updates per second.")]
     [SerializeField]
@@ -233,7 +233,7 @@ public class AprilTagController : MonoBehaviour
 
     [Tooltip("Maximum image height allowed for GPU processing (to prevent crashes)")]
     [SerializeField]
-    private int m_gpuMaxImageHeight = 960;
+    private int m_gpuMaxImageHeight = 1280;
 
     [Tooltip("Path to the main preprocessing compute shader (relative to Resources folder)")]
     [SerializeField]
@@ -288,7 +288,9 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private float m_maxRotationDeviation = 30f; // Increased from 15f for Quest jitter
 
-    [Tooltip("Enable corner quality assessment (Note: GPU preprocessing provides similar benefits through noise reduction and edge enhancement)")]
+    [Tooltip(
+        "Enable corner quality assessment (Note: GPU preprocessing provides similar benefits through noise reduction and edge enhancement)"
+    )]
     [SerializeField]
     private bool m_enableCornerQualityAssessment = false; // Disabled by default when GPU preprocessing is enabled
 
@@ -755,26 +757,17 @@ public class AprilTagController : MonoBehaviour
                             var expectedPixels = wct.width * wct.height;
                             if (m_rgba.Length == expectedPixels)
                             {
-                                if (m_enableAllDebugLogging && Time.frameCount % m_debugLogInterval == 0)
+                                if (
+                                    m_enableAllDebugLogging
+                                    && Time.frameCount % m_debugLogInterval == 0
+                                )
                                 {
                                     Debug.Log(
                                         $"[AprilTag] GPU preprocessing completed in {m_gpuPreprocessor.LastProcessingTimeMs:F2}ms, processed {m_rgba.Length} pixels"
                                     );
                                 }
 
-                                // Debug: Save preprocessed image
-                                if (m_debugSavePreprocessedImage && 
-                                    (m_debugImageSaveInterval == 0 || Time.frameCount % m_debugImageSaveInterval == 0))
-                                {
-                                    SaveDebugImage(m_rgba, m_detW, m_detH, true);
-                                    
-                                    // Also save raw image for comparison if requested
-                                    if (m_debugSaveBothRawAndProcessed)
-                                    {
-                                        var rawPixels = wct.GetPixels32();
-                                        SaveDebugImage(rawPixels, wct.width, wct.height, false);
-                                    }
-                                }
+                                // Debug image saving moved to after detection for overlay support
                             }
                             else
                             {
@@ -821,13 +814,8 @@ public class AprilTagController : MonoBehaviour
             {
                 // Get pixels directly from WebCamTexture (original path)
                 m_rgba = wct.GetPixels32();
-                
-                // Debug: Save raw image when GPU preprocessing is disabled
-                if (m_debugSavePreprocessedImage && 
-                    (m_debugImageSaveInterval == 0 || Time.frameCount % m_debugImageSaveInterval == 0))
-                {
-                    SaveDebugImage(m_rgba, wct.width, wct.height, false);
-                }
+
+                // Debug image saving moved to after detection for overlay support
             }
 
             if (m_rgba == null || m_rgba.Length == 0)
@@ -848,6 +836,11 @@ public class AprilTagController : MonoBehaviour
         // Constructor takes (width, height, decimation).
         // Detection call takes (pixels, fovDeg, tagSizeMeters).
         m_detector.ProcessImage(m_rgba.AsSpan(), m_horizontalFovDeg, m_tagSizeMeters);
+
+        // Store whether we should save debug images this frame
+        bool shouldSaveDebugImage =
+            m_debugSavePreprocessedImage
+            && (m_debugImageSaveInterval == 0 || Time.frameCount % m_debugImageSaveInterval == 0);
 
         // Debug logging for detection count
         if (Time.frameCount % m_debugLogInterval == 0) // Log periodically regardless of enableAllDebugLogging
@@ -900,6 +893,20 @@ public class AprilTagController : MonoBehaviour
             m_webcamPipeline != null
                 ? m_webcamPipeline.GetRawDetections(m_detector)
                 : new System.Collections.Generic.List<object>();
+
+        // Save debug images now that we have detection data
+        if (shouldSaveDebugImage)
+        {
+            // Save the processed/raw image with detection overlays
+            SaveDebugImage(m_rgba, m_detW, m_detH, m_enableGPUPreprocessing);
+
+            // Also save raw image for comparison if requested
+            if (m_debugSaveBothRawAndProcessed && m_enableGPUPreprocessing && wct != null)
+            {
+                var rawPixels = wct.GetPixels32();
+                SaveDebugImage(rawPixels, wct.width, wct.height, false);
+            }
+        }
 
         foreach (var t in m_detector.DetectedTags)
         {
@@ -1070,10 +1077,13 @@ public class AprilTagController : MonoBehaviour
 
             // PhotonVision-inspired filtering and validation
             float cornerQuality = 1.0f; // Default to perfect quality
-            
+
             // Only perform CPU-based corner quality assessment if GPU preprocessing is disabled
             // or if corner quality assessment is explicitly enabled
-            if (m_enableCornerQualityAssessment && (!m_enableGPUPreprocessing || m_enableCornerQualityAssessment))
+            if (
+                m_enableCornerQualityAssessment
+                && (!m_enableGPUPreprocessing || m_enableCornerQualityAssessment)
+            )
             {
                 var corners = m_transforms.ExtractCornersFromRawDetection(t.ID, rawDetections);
                 cornerQuality = CalculateCornerQuality(corners);
@@ -1090,9 +1100,15 @@ public class AprilTagController : MonoBehaviour
                     continue; // Skip this detection
                 }
             }
-            else if (m_enableGPUPreprocessing && m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
+            else if (
+                m_enableGPUPreprocessing
+                && m_enableAllDebugLogging
+                && Time.frameCount % m_verboseDebugLogInterval == 0
+            )
             {
-                Debug.Log("[AprilTag] Corner quality assessment skipped - GPU preprocessing provides image quality enhancement");
+                Debug.Log(
+                    "[AprilTag] Corner quality assessment skipped - GPU preprocessing provides image quality enhancement"
+                );
             }
 
             // Multi-frame validation (PhotonVision approach)
@@ -1269,7 +1285,9 @@ public class AprilTagController : MonoBehaviour
         {
             // Use a simplified corner quality calculation
             // In a real implementation, you might want to access actual corner quality data
-            var cornerQuality = Mathf.Clamp01(1.0f - tag.Position.magnitude * m_distanceQualityDecayFactor); // Distance-based quality
+            var cornerQuality = Mathf.Clamp01(
+                1.0f - tag.Position.magnitude * m_distanceQualityDecayFactor
+            ); // Distance-based quality
             confidence *= cornerQuality;
 
             if (m_enableAllDebugLogging)
@@ -1425,7 +1443,6 @@ public class AprilTagController : MonoBehaviour
         }
     }
 
-
     // Quest-compatible debugging methods
     public void ToggleDistanceScalingRuntime()
     {
@@ -1462,8 +1479,13 @@ public class AprilTagController : MonoBehaviour
         if (m_rgba != null && m_rgba.Length > 0 && m_detW > 0 && m_detH > 0)
         {
             Debug.Log("[AprilTag] Force saving debug image...");
+
+            // Log current detection state
+            var detectionCount = m_detector?.DetectedTags?.Count() ?? 0;
+            Debug.Log($"[AprilTag] Current detections: {detectionCount}");
+
             SaveDebugImage(m_rgba, m_detW, m_detH, m_enableGPUPreprocessing);
-            
+
             if (m_debugSaveBothRawAndProcessed && m_webcamPipeline != null)
             {
                 var wct = m_webcamPipeline.GetActiveWebCamTexture();
@@ -1546,15 +1568,19 @@ public class AprilTagController : MonoBehaviour
 
         // Debug image capture controls (always available when Quest debugging is enabled)
         // Left controller trigger + A button = Toggle debug image saving
-        if (OVRInput.Get(OVRInput.RawButton.LIndexTrigger, OVRInput.Controller.LTouch) &&
-            OVRInput.GetDown(OVRInput.RawButton.X, OVRInput.Controller.LTouch))
+        if (
+            OVRInput.Get(OVRInput.RawButton.LIndexTrigger, OVRInput.Controller.LTouch)
+            && OVRInput.GetDown(OVRInput.RawButton.X, OVRInput.Controller.LTouch)
+        )
         {
             ToggleDebugImageSaving();
         }
 
         // Left controller trigger + B button = Force save debug image
-        if (OVRInput.Get(OVRInput.RawButton.LIndexTrigger, OVRInput.Controller.LTouch) &&
-            OVRInput.GetDown(OVRInput.RawButton.Y, OVRInput.Controller.LTouch))
+        if (
+            OVRInput.Get(OVRInput.RawButton.LIndexTrigger, OVRInput.Controller.LTouch)
+            && OVRInput.GetDown(OVRInput.RawButton.Y, OVRInput.Controller.LTouch)
+        )
         {
             ForceSaveDebugImage();
         }
@@ -1565,7 +1591,6 @@ public class AprilTagController : MonoBehaviour
             LogCurrentSettings();
         }
     }
-
 
     // PhotonVision-inspired pose filtering implementation
     // Based on PhotonVision's temporal filtering approach for stable pose estimation
@@ -1670,7 +1695,10 @@ public class AprilTagController : MonoBehaviour
 
         foreach (var detection in history)
         {
-            if (detection.IsValid && (Time.time - detection.Timestamp) < m_validationRecentDetectionTime) // Only use recent detections
+            if (
+                detection.IsValid
+                && (Time.time - detection.Timestamp) < m_validationRecentDetectionTime
+            ) // Only use recent detections
             {
                 avgPosition += detection.Position;
                 avgEulerAngles += detection.Rotation.eulerAngles;
@@ -1793,7 +1821,11 @@ public class AprilTagController : MonoBehaviour
         var avgAngleDeviation = totalAngleDeviation / 4f;
         if (avgAngleDeviation > m_maxCornerAngleDeviation) // Corners too far from 90 degrees
         {
-            quality *= Mathf.Lerp(1.0f, 0.2f, (avgAngleDeviation - m_maxCornerAngleDeviation) / (m_maxCornerAngleDeviation * 2f));
+            quality *= Mathf.Lerp(
+                1.0f,
+                0.2f,
+                (avgAngleDeviation - m_maxCornerAngleDeviation) / (m_maxCornerAngleDeviation * 2f)
+            );
         }
 
         // Check for convexity (corners should form a convex quadrilateral)
@@ -1835,7 +1867,6 @@ public class AprilTagController : MonoBehaviour
         return quality;
     }
 
-
     private void SaveRuntimeOffset()
     {
         if (m_saveRuntimeOffset)
@@ -1860,7 +1891,12 @@ public class AprilTagController : MonoBehaviour
         }
     }
 
-    private void SaveDebugImage(Color32[] pixels, int width, int height, bool isPreprocessed = false)
+    private void SaveDebugImage(
+        Color32[] pixels,
+        int width,
+        int height,
+        bool isPreprocessed = false
+    )
     {
         try
         {
@@ -1903,7 +1939,9 @@ public class AprilTagController : MonoBehaviour
             if (m_enableAllDebugLogging)
             {
                 var detectionCount = m_detector?.DetectedTags?.Count() ?? 0;
-                Debug.Log($"[AprilTag] Debug image info - Type: {imageType}, Size: {width}x{height}, Detections: {detectionCount}");
+                Debug.Log(
+                    $"[AprilTag] Debug image info - Type: {imageType}, Size: {width}x{height}, Detections: {detectionCount}"
+                );
             }
 
             Destroy(tex);
@@ -1917,44 +1955,159 @@ public class AprilTagController : MonoBehaviour
     private string GetDebugImagePath()
     {
         // Use persistent data path which works on all platforms including Quest
-        #if UNITY_ANDROID && !UNITY_EDITOR
-            // On Quest, this will be something like: /storage/emulated/0/Android/data/com.yourcompany.appname/files/AprilTagDebug
-            return System.IO.Path.Combine(Application.persistentDataPath, "AprilTagDebug");
-        #else
-            // In editor or other platforms, use a more accessible location
-            return System.IO.Path.Combine(Application.dataPath, "..", "AprilTagDebug");
-        #endif
+#if UNITY_ANDROID && !UNITY_EDITOR
+        // On Quest, this will be something like: /storage/emulated/0/Android/data/com.yourcompany.appname/files/AprilTagDebug
+        return System.IO.Path.Combine(Application.persistentDataPath, "AprilTagDebug");
+#else
+        // In editor or other platforms, use a more accessible location
+        return System.IO.Path.Combine(Application.dataPath, "..", "AprilTagDebug");
+#endif
     }
 
     private void DrawDetectionOverlays(Texture2D tex)
     {
         try
         {
+            if (m_detector?.DetectedTags == null || !m_detector.DetectedTags.Any())
+            {
+                if (m_enableAllDebugLogging)
+                {
+                    Debug.Log("[AprilTag] No detections to draw overlays for");
+                }
+                return;
+            }
+
             // Get raw detections for corner data
-            var rawDetections = m_webcamPipeline != null 
-                ? m_webcamPipeline.GetRawDetections(m_detector) 
-                : new System.Collections.Generic.List<object>();
+            var rawDetections =
+                m_webcamPipeline != null
+                    ? m_webcamPipeline.GetRawDetections(m_detector)
+                    : new System.Collections.Generic.List<object>();
+
+            var overlayCount = 0;
+            var totalDetections = m_detector.DetectedTags?.Count() ?? 0;
+
+            if (m_enableAllDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTag] Starting overlay drawing for {totalDetections} detected tags"
+                );
+                foreach (var tag in m_detector.DetectedTags)
+                {
+                    Debug.Log($"[AprilTag] Processing tag {tag.ID} for overlay drawing");
+                }
+            }
 
             foreach (var tag in m_detector.DetectedTags)
             {
-                // Extract corners for this tag
-                var corners = m_transforms.ExtractCornersFromRawDetection(tag.ID, rawDetections);
-                if (corners != null && corners.Length == 4)
+                // Use corner-based center since it's working and gives correct image coordinates
+                Vector2? center = null;
+                string centerSource = "corner-based";
+
+                // Get corner center using the same method that works in Update()
+                var cornerCenter = m_transforms.TryGetCornerBasedCenter(tag.ID, rawDetections);
+                if (cornerCenter.HasValue)
                 {
-                    // Draw tag outline
-                    DrawTagOutline(tex, corners, tag.ID);
+                    center = cornerCenter.Value;
+                }
+                else if (m_enableAllDebugLogging)
+                {
+                    Debug.LogWarning(
+                        $"[AprilTag] Could not extract corner center for tag {tag.ID}"
+                    );
                 }
 
-                // Draw tag ID and position info
-                if (corners != null && corners.Length > 0)
+                if (center.HasValue)
                 {
-                    DrawTagInfo(tex, corners[0], tag);
+                    // Convert center to debug image coordinates
+                    var scaleX = (float)tex.width / m_detW;
+                    var scaleY = (float)tex.height / m_detH;
+
+                    // Apply scaling to the center point
+                    var scaledCenter = new Vector2(
+                        center.Value.x * scaleX,
+                        center.Value.y * scaleY
+                    );
+
+                    // Use a larger tag size for better visibility
+                    var tagSizePixels = 60f; // Increased size for better debugging visibility
+                    var halfSize = tagSizePixels * 0.5f;
+
+                    if (m_enableAllDebugLogging)
+                    {
+                        Debug.Log(
+                            $"[AprilTag] Tag {tag.ID} size calculation: tagSizePixels={tagSizePixels}, halfSize={halfSize}"
+                        );
+                    }
+
+                    // Check if the overlay would be within image bounds
+                    var minX = scaledCenter.x - halfSize;
+                    var maxX = scaledCenter.x + halfSize;
+                    var minY = scaledCenter.y - halfSize;
+                    var maxY = scaledCenter.y + halfSize;
+
+                    if (minX >= 0 && maxX < tex.width && minY >= 0 && maxY < tex.height)
+                    {
+                        // Create 4 corners for a square around the scaled center
+                        var corners = new Vector2[]
+                        {
+                            new Vector2(scaledCenter.x - halfSize, scaledCenter.y - halfSize), // Top-left
+                            new Vector2(scaledCenter.x + halfSize, scaledCenter.y - halfSize), // Top-right
+                            new Vector2(scaledCenter.x + halfSize, scaledCenter.y + halfSize), // Bottom-right
+                            new Vector2(scaledCenter.x - halfSize, scaledCenter.y + halfSize), // Bottom-left
+                        };
+
+                        if (m_enableAllDebugLogging)
+                        {
+                            Debug.Log(
+                                $"[AprilTag] Created corners for tag {tag.ID}: TL=({corners[0].x:F1}, {corners[0].y:F1}), TR=({corners[1].x:F1}, {corners[1].y:F1}), BR=({corners[2].x:F1}, {corners[2].y:F1}), BL=({corners[3].x:F1}, {corners[3].y:F1})"
+                            );
+                        }
+
+                        // Draw tag outline
+                        DrawTagOutline(tex, corners, tag.ID);
+                        overlayCount++;
+
+                        if (m_enableAllDebugLogging)
+                        {
+                            Debug.Log(
+                                $"[AprilTag] Drew overlay for tag {tag.ID} - Source: {centerSource}, Original center: {center.Value}, Scaled center: {scaledCenter}, Tag size: {tagSizePixels}px"
+                            );
+                        }
+
+                        // Draw tag ID and position info
+                        DrawTagInfo(tex, scaledCenter, tag);
+                    }
+                    else if (m_enableAllDebugLogging)
+                    {
+                        Debug.LogWarning(
+                            $"[AprilTag] Tag {tag.ID} overlay would be outside image bounds - Source: {centerSource}, Center: {scaledCenter}, Size: {tagSizePixels}px, Bounds: ({minX:F1}, {minY:F1}) to ({maxX:F1}, {maxY:F1}), Image: {tex.width}x{tex.height}"
+                        );
+                    }
                 }
+                else if (m_enableAllDebugLogging)
+                {
+                    Debug.LogWarning(
+                        $"[AprilTag] Could not determine center for tag {tag.ID} using any method"
+                    );
+                }
+            }
+
+            if (m_enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Drew {overlayCount} detection overlays on debug image");
+                Debug.Log(
+                    $"[AprilTag] Debug image dimensions: {tex.width}x{tex.height}, Detection dimensions: {m_detW}x{m_detH}"
+                );
+                Debug.Log(
+                    $"[AprilTag] Scale factors: X={((float)tex.width / m_detW):F3}, Y={((float)tex.height / m_detH):F3}"
+                );
             }
         }
         catch (Exception e)
         {
-            Debug.LogWarning($"[AprilTag] Failed to draw detection overlays: {e.Message}");
+            Debug.LogWarning(
+                $"[AprilTag] Failed to draw detection overlays: {e.Message}\n{e.StackTrace}"
+            );
         }
     }
 
@@ -1962,6 +2115,13 @@ public class AprilTagController : MonoBehaviour
     {
         // Choose color based on tag ID
         var color = GetDebugColorForTag(tagId);
+
+        if (m_enableAllDebugLogging)
+        {
+            Debug.Log(
+                $"[AprilTag] Drawing outline for tag {tagId} with color {color} at corners: [{corners[0]}, {corners[1]}, {corners[2]}, {corners[3]}]"
+            );
+        }
 
         // Draw lines between corners
         for (int i = 0; i < 4; i++)
@@ -1984,14 +2144,39 @@ public class AprilTagController : MonoBehaviour
         // For now, just draw a colored square to indicate the tag ID
         var color = GetDebugColorForTag(tag.ID);
         var infoPos = position + new Vector2(10, -10);
+
+        if (m_enableAllDebugLogging)
+        {
+            Debug.Log(
+                $"[AprilTag] Drawing tag info for tag {tag.ID} at position {infoPos} with color {color} (20x10 rect)"
+            );
+        }
+
         DrawFilledRect(tex, infoPos, 20, 10, color);
     }
 
     private Color GetDebugColorForTag(int tagId)
     {
         // Generate consistent colors for tag IDs
-        var colors = new Color[] { Color.red, Color.green, Color.blue, Color.yellow, Color.magenta, Color.cyan };
-        return colors[tagId % colors.Length];
+        var colors = new Color[]
+        {
+            Color.red,
+            Color.green,
+            Color.blue,
+            Color.yellow,
+            Color.magenta,
+            Color.cyan,
+        };
+        var color = colors[tagId % colors.Length];
+
+        if (m_enableAllDebugLogging)
+        {
+            Debug.Log(
+                $"[AprilTag] Tag {tagId} assigned color {color} (index {tagId % colors.Length})"
+            );
+        }
+
+        return color;
     }
 
     private void DrawLine(Texture2D tex, Vector2 start, Vector2 end, Color color, int thickness = 1)
@@ -2011,15 +2196,16 @@ public class AprilTagController : MonoBehaviour
         while (true)
         {
             // Draw with thickness
-            for (int tx = -thickness/2; tx <= thickness/2; tx++)
+            for (int tx = -thickness / 2; tx <= thickness / 2; tx++)
             {
-                for (int ty = -thickness/2; ty <= thickness/2; ty++)
+                for (int ty = -thickness / 2; ty <= thickness / 2; ty++)
                 {
                     SetPixelSafe(tex, x0 + tx, y0 + ty, color);
                 }
             }
 
-            if (x0 == x1 && y0 == y1) break;
+            if (x0 == x1 && y0 == y1)
+                break;
             int e2 = 2 * err;
             if (e2 > -dy)
             {
@@ -2071,13 +2257,20 @@ public class AprilTagController : MonoBehaviour
         {
             tex.SetPixel(x, y, color);
         }
+        else if (m_enableAllDebugLogging)
+        {
+            Debug.LogWarning(
+                $"[AprilTag] Attempted to set pixel at ({x}, {y}) outside bounds ({tex.width}x{tex.height})"
+            );
+        }
     }
 
     private void CleanupOldDebugImages(string debugPath)
     {
         try
         {
-            var files = System.IO.Directory.GetFiles(debugPath, "AprilTag_Debug_*.png")
+            var files = System
+                .IO.Directory.GetFiles(debugPath, "AprilTag_Debug_*.png")
                 .OrderBy(f => System.IO.File.GetCreationTime(f))
                 .ToArray();
 

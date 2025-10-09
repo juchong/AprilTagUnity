@@ -30,7 +30,7 @@ namespace AprilTag
 
             [Range(0f, 1f)]
             [Tooltip("Strength of histogram equalization (0 = none, 1 = full)")]
-            public float HistogramStrength = 0.7f; // Increased for better effect
+            public float HistogramStrength = 0.4f; // Increased for better effect
 
             [Header("Noise Reduction")]
             [Tooltip("Enable Gaussian blur for noise reduction - Improves corner detection by reducing false corners from noise")]
@@ -42,7 +42,7 @@ namespace AprilTag
 
             [Range(0.5f, 3f)]
             [Tooltip("Gaussian sigma value")]
-            public float BlurSigma = 1.0f; // Balanced for noise reduction without losing corners
+            public float BlurSigma = 0.5f; // Balanced for noise reduction without losing corners
 
             [Header("Edge Enhancement")]
             [Tooltip("Enable edge enhancement for sharper tag borders - Improves corner sharpness (use carefully, can introduce artifacts)")]
