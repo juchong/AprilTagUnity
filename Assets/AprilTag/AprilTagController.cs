@@ -207,9 +207,25 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private AprilTagGPUPreprocessor.PreprocessingSettings m_gpuPreprocessingSettings = new();
 
-    [Tooltip("Save preprocessed image for debugging (creates AprilTag_Debug.png in project root)")]
+    [Tooltip("Save preprocessed image for debugging (saves to persistent data path on Quest)")]
     [SerializeField]
     private bool m_debugSavePreprocessedImage = false;
+
+    [Tooltip("Include detection overlays in debug image (draws detected tag outlines)")]
+    [SerializeField]
+    private bool m_debugIncludeDetectionOverlay = true;
+
+    [Tooltip("Debug image save interval (frames between saves, 0 = save every detection)")]
+    [SerializeField]
+    private int m_debugImageSaveInterval = 300; // Every 5 seconds at 60fps
+
+    [Tooltip("Maximum debug images to keep (older ones are deleted)")]
+    [SerializeField]
+    private int m_maxDebugImages = 10;
+
+    [Tooltip("Save both raw and preprocessed images for comparison")]
+    [SerializeField]
+    private bool m_debugSaveBothRawAndProcessed = false;
 
     [Tooltip("Maximum image width allowed for GPU processing (to prevent crashes)")]
     [SerializeField]
@@ -747,9 +763,17 @@ public class AprilTagController : MonoBehaviour
                                 }
 
                                 // Debug: Save preprocessed image
-                                if (m_debugSavePreprocessedImage && Time.frameCount % m_verboseDebugLogInterval == 0)
+                                if (m_debugSavePreprocessedImage && 
+                                    (m_debugImageSaveInterval == 0 || Time.frameCount % m_debugImageSaveInterval == 0))
                                 {
-                                    SaveDebugImage(m_rgba, m_detW, m_detH);
+                                    SaveDebugImage(m_rgba, m_detW, m_detH, true);
+                                    
+                                    // Also save raw image for comparison if requested
+                                    if (m_debugSaveBothRawAndProcessed)
+                                    {
+                                        var rawPixels = wct.GetPixels32();
+                                        SaveDebugImage(rawPixels, wct.width, wct.height, false);
+                                    }
                                 }
                             }
                             else
@@ -797,6 +821,13 @@ public class AprilTagController : MonoBehaviour
             {
                 // Get pixels directly from WebCamTexture (original path)
                 m_rgba = wct.GetPixels32();
+                
+                // Debug: Save raw image when GPU preprocessing is disabled
+                if (m_debugSavePreprocessedImage && 
+                    (m_debugImageSaveInterval == 0 || Time.frameCount % m_debugImageSaveInterval == 0))
+                {
+                    SaveDebugImage(m_rgba, wct.width, wct.height, false);
+                }
             }
 
             if (m_rgba == null || m_rgba.Length == 0)
@@ -1404,6 +1435,51 @@ public class AprilTagController : MonoBehaviour
         );
     }
 
+    /// <summary>
+    /// Toggle debug image saving at runtime (useful for Quest debugging)
+    /// </summary>
+    public void ToggleDebugImageSaving()
+    {
+        m_debugSavePreprocessedImage = !m_debugSavePreprocessedImage;
+        if (m_debugSavePreprocessedImage)
+        {
+            var path = GetDebugImagePath();
+            Debug.Log($"[AprilTag] Debug image saving ENABLED. Images will be saved to: {path}");
+            Debug.Log("[AprilTag] On Quest, use 'adb pull' to retrieve images:");
+            Debug.Log($"[AprilTag] adb pull \"{path}\" .");
+        }
+        else
+        {
+            Debug.Log("[AprilTag] Debug image saving DISABLED");
+        }
+    }
+
+    /// <summary>
+    /// Force save a debug image immediately (useful for Quest debugging)
+    /// </summary>
+    public void ForceSaveDebugImage()
+    {
+        if (m_rgba != null && m_rgba.Length > 0 && m_detW > 0 && m_detH > 0)
+        {
+            Debug.Log("[AprilTag] Force saving debug image...");
+            SaveDebugImage(m_rgba, m_detW, m_detH, m_enableGPUPreprocessing);
+            
+            if (m_debugSaveBothRawAndProcessed && m_webcamPipeline != null)
+            {
+                var wct = m_webcamPipeline.GetActiveWebCamTexture();
+                if (wct != null && wct.isPlaying)
+                {
+                    var rawPixels = wct.GetPixels32();
+                    SaveDebugImage(rawPixels, wct.width, wct.height, false);
+                }
+            }
+        }
+        else
+        {
+            Debug.LogWarning("[AprilTag] Cannot save debug image - no valid image data available");
+        }
+    }
+
     public void SetPositionScaleFactor(float scale)
     {
         m_positionScaleFactor = scale;
@@ -1466,6 +1542,21 @@ public class AprilTagController : MonoBehaviour
                     $"[AprilTag] Runtime Offset: X={m_cornerPositionOffset.x:F3}, Y={m_cornerPositionOffset.y:F3}, Z={m_cornerPositionOffset.z:F3}"
                 );
             }
+        }
+
+        // Debug image capture controls (always available when Quest debugging is enabled)
+        // Left controller trigger + A button = Toggle debug image saving
+        if (OVRInput.Get(OVRInput.RawButton.LIndexTrigger, OVRInput.Controller.LTouch) &&
+            OVRInput.GetDown(OVRInput.RawButton.X, OVRInput.Controller.LTouch))
+        {
+            ToggleDebugImageSaving();
+        }
+
+        // Left controller trigger + B button = Force save debug image
+        if (OVRInput.Get(OVRInput.RawButton.LIndexTrigger, OVRInput.Controller.LTouch) &&
+            OVRInput.GetDown(OVRInput.RawButton.Y, OVRInput.Controller.LTouch))
+        {
+            ForceSaveDebugImage();
         }
 
         // Log the current settings every 5 seconds when debugging is enabled
@@ -1769,25 +1860,238 @@ public class AprilTagController : MonoBehaviour
         }
     }
 
-    private void SaveDebugImage(Color32[] pixels, int width, int height)
+    private void SaveDebugImage(Color32[] pixels, int width, int height, bool isPreprocessed = false)
     {
         try
         {
+            // Create texture from pixels
             var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
             tex.SetPixels32(pixels);
+
+            // Draw detection overlays if enabled and we have detections
+            if (m_debugIncludeDetectionOverlay && m_detector?.DetectedTags != null)
+            {
+                DrawDetectionOverlays(tex);
+            }
+
             tex.Apply();
 
-            var bytes = tex.EncodeToPNG();
-            var path = System.IO.Path.Combine(Application.dataPath, "..", "AprilTag_Debug.png");
-            System.IO.File.WriteAllBytes(path, bytes);
+            // Generate filename with timestamp
+            var timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var imageType = isPreprocessed ? "preprocessed" : "raw";
+            var filename = $"AprilTag_Debug_{imageType}_{timestamp}.png";
 
-            Debug.Log($"[AprilTag] Saved debug image to: {path}");
+            // Use persistent data path for Quest compatibility
+            string debugPath = GetDebugImagePath();
+            if (!System.IO.Directory.Exists(debugPath))
+            {
+                System.IO.Directory.CreateDirectory(debugPath);
+            }
+
+            var fullPath = System.IO.Path.Combine(debugPath, filename);
+
+            // Save the image
+            var bytes = tex.EncodeToPNG();
+            System.IO.File.WriteAllBytes(fullPath, bytes);
+
+            Debug.Log($"[AprilTag] Saved debug image to: {fullPath}");
+
+            // Clean up old debug images
+            CleanupOldDebugImages(debugPath);
+
+            // Log additional debug info
+            if (m_enableAllDebugLogging)
+            {
+                var detectionCount = m_detector?.DetectedTags?.Count() ?? 0;
+                Debug.Log($"[AprilTag] Debug image info - Type: {imageType}, Size: {width}x{height}, Detections: {detectionCount}");
+            }
 
             Destroy(tex);
         }
         catch (Exception e)
         {
             Debug.LogError($"[AprilTag] Failed to save debug image: {e.Message}");
+        }
+    }
+
+    private string GetDebugImagePath()
+    {
+        // Use persistent data path which works on all platforms including Quest
+        #if UNITY_ANDROID && !UNITY_EDITOR
+            // On Quest, this will be something like: /storage/emulated/0/Android/data/com.yourcompany.appname/files/AprilTagDebug
+            return System.IO.Path.Combine(Application.persistentDataPath, "AprilTagDebug");
+        #else
+            // In editor or other platforms, use a more accessible location
+            return System.IO.Path.Combine(Application.dataPath, "..", "AprilTagDebug");
+        #endif
+    }
+
+    private void DrawDetectionOverlays(Texture2D tex)
+    {
+        try
+        {
+            // Get raw detections for corner data
+            var rawDetections = m_webcamPipeline != null 
+                ? m_webcamPipeline.GetRawDetections(m_detector) 
+                : new System.Collections.Generic.List<object>();
+
+            foreach (var tag in m_detector.DetectedTags)
+            {
+                // Extract corners for this tag
+                var corners = m_transforms.ExtractCornersFromRawDetection(tag.ID, rawDetections);
+                if (corners != null && corners.Length == 4)
+                {
+                    // Draw tag outline
+                    DrawTagOutline(tex, corners, tag.ID);
+                }
+
+                // Draw tag ID and position info
+                if (corners != null && corners.Length > 0)
+                {
+                    DrawTagInfo(tex, corners[0], tag);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[AprilTag] Failed to draw detection overlays: {e.Message}");
+        }
+    }
+
+    private void DrawTagOutline(Texture2D tex, Vector2[] corners, int tagId)
+    {
+        // Choose color based on tag ID
+        var color = GetDebugColorForTag(tagId);
+
+        // Draw lines between corners
+        for (int i = 0; i < 4; i++)
+        {
+            var start = corners[i];
+            var end = corners[(i + 1) % 4];
+            DrawLine(tex, start, end, color, 2);
+        }
+
+        // Draw corner markers
+        for (int i = 0; i < 4; i++)
+        {
+            DrawCircle(tex, corners[i], 5, color);
+        }
+    }
+
+    private void DrawTagInfo(Texture2D tex, Vector2 position, TagPose tag)
+    {
+        // This is a simplified version - in a real implementation you might want to use TextMeshPro
+        // For now, just draw a colored square to indicate the tag ID
+        var color = GetDebugColorForTag(tag.ID);
+        var infoPos = position + new Vector2(10, -10);
+        DrawFilledRect(tex, infoPos, 20, 10, color);
+    }
+
+    private Color GetDebugColorForTag(int tagId)
+    {
+        // Generate consistent colors for tag IDs
+        var colors = new Color[] { Color.red, Color.green, Color.blue, Color.yellow, Color.magenta, Color.cyan };
+        return colors[tagId % colors.Length];
+    }
+
+    private void DrawLine(Texture2D tex, Vector2 start, Vector2 end, Color color, int thickness = 1)
+    {
+        // Simple line drawing algorithm
+        int x0 = (int)start.x;
+        int y0 = (int)start.y;
+        int x1 = (int)end.x;
+        int y1 = (int)end.y;
+
+        int dx = Mathf.Abs(x1 - x0);
+        int dy = Mathf.Abs(y1 - y0);
+        int sx = x0 < x1 ? 1 : -1;
+        int sy = y0 < y1 ? 1 : -1;
+        int err = dx - dy;
+
+        while (true)
+        {
+            // Draw with thickness
+            for (int tx = -thickness/2; tx <= thickness/2; tx++)
+            {
+                for (int ty = -thickness/2; ty <= thickness/2; ty++)
+                {
+                    SetPixelSafe(tex, x0 + tx, y0 + ty, color);
+                }
+            }
+
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = 2 * err;
+            if (e2 > -dy)
+            {
+                err -= dy;
+                x0 += sx;
+            }
+            if (e2 < dx)
+            {
+                err += dx;
+                y0 += sy;
+            }
+        }
+    }
+
+    private void DrawCircle(Texture2D tex, Vector2 center, int radius, Color color)
+    {
+        int cx = (int)center.x;
+        int cy = (int)center.y;
+
+        for (int x = -radius; x <= radius; x++)
+        {
+            for (int y = -radius; y <= radius; y++)
+            {
+                if (x * x + y * y <= radius * radius)
+                {
+                    SetPixelSafe(tex, cx + x, cy + y, color);
+                }
+            }
+        }
+    }
+
+    private void DrawFilledRect(Texture2D tex, Vector2 position, int width, int height, Color color)
+    {
+        int x = (int)position.x;
+        int y = (int)position.y;
+
+        for (int dx = 0; dx < width; dx++)
+        {
+            for (int dy = 0; dy < height; dy++)
+            {
+                SetPixelSafe(tex, x + dx, y + dy, color);
+            }
+        }
+    }
+
+    private void SetPixelSafe(Texture2D tex, int x, int y, Color color)
+    {
+        if (x >= 0 && x < tex.width && y >= 0 && y < tex.height)
+        {
+            tex.SetPixel(x, y, color);
+        }
+    }
+
+    private void CleanupOldDebugImages(string debugPath)
+    {
+        try
+        {
+            var files = System.IO.Directory.GetFiles(debugPath, "AprilTag_Debug_*.png")
+                .OrderBy(f => System.IO.File.GetCreationTime(f))
+                .ToArray();
+
+            // Delete oldest files if we exceed the limit
+            while (files.Length > m_maxDebugImages)
+            {
+                System.IO.File.Delete(files[0]);
+                Debug.Log($"[AprilTag] Deleted old debug image: {files[0]}");
+                files = files.Skip(1).ToArray();
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[AprilTag] Failed to cleanup old debug images: {e.Message}");
         }
     }
 
