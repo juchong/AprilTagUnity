@@ -101,7 +101,7 @@ public class AprilTagController : MonoBehaviour
 
     [Tooltip("Use improved camera intrinsics for better tag alignment")]
     [SerializeField]
-    private bool m_useImprovedIntrinsics = false;
+    private bool m_useImprovedIntrinsics = true;
 
     [Tooltip(
         "Make tags world-locked (rotation independent of headset movement) - inspired by PhotonVision's stable pose estimation"
@@ -425,6 +425,7 @@ public class AprilTagController : MonoBehaviour
         public Quaternion RawRotation;
         public float LastUpdateTime;
         public bool IsInitialized;
+        public int FramesSinceFirstDetection; // Track how many frames this tag has been tracked
 
         public FilteredTagPose()
         {
@@ -434,6 +435,7 @@ public class AprilTagController : MonoBehaviour
             RawRotation = Quaternion.identity;
             LastUpdateTime = 0f;
             IsInitialized = false;
+            FramesSinceFirstDetection = 0;
         }
     }
 
@@ -1132,6 +1134,17 @@ public class AprilTagController : MonoBehaviour
                 var filteredPose = m_filteredPoses[t.ID];
                 var deltaTime = Time.time - filteredPose.LastUpdateTime;
 
+                // Increment frame counter
+                filteredPose.FramesSinceFirstDetection++;
+
+                // Only mark as initialized after sufficient stable frames to prevent
+                // anchors from being placed during the initial position stabilization period
+                const int MIN_FRAMES_FOR_INITIALIZATION = 10; // ~0.17s at 60fps
+                if (filteredPose.FramesSinceFirstDetection >= MIN_FRAMES_FOR_INITIALIZATION)
+                {
+                    filteredPose.IsInitialized = true;
+                }
+
                 // Apply PhotonVision-inspired temporal filtering
                 finalPosition = FilterTagPosition(
                     worldPosition,
@@ -1152,7 +1165,14 @@ public class AprilTagController : MonoBehaviour
                 filteredPose.FilteredPosition = finalPosition;
                 filteredPose.FilteredRotation = finalRotation;
                 filteredPose.LastUpdateTime = Time.time;
-                filteredPose.IsInitialized = true;
+
+                // Log initialization progress
+                if (m_enableAllDebugLogging && !filteredPose.IsInitialized)
+                {
+                    Debug.Log(
+                        $"[AprilTag] Tag {t.ID} initializing: {filteredPose.FramesSinceFirstDetection}/{MIN_FRAMES_FOR_INITIALIZATION} frames"
+                    );
+                }
             }
 
             if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
@@ -1215,6 +1235,23 @@ public class AprilTagController : MonoBehaviour
         // Process each detected tag for spatial anchor creation
         foreach (var tag in m_detector.DetectedTags)
         {
+            // CRITICAL: Only process anchors for tags with initialized filtered poses
+            // This prevents placing anchors at unstable initial positions during the
+            // pose smoothing "warm-up" period when visualizations appear "frozen"
+            if (
+                !m_filteredPoses.TryGetValue(tag.ID, out var filteredPose)
+                || !filteredPose.IsInitialized
+            )
+            {
+                if (m_enableAllDebugLogging)
+                {
+                    Debug.Log(
+                        $"[AprilTag] Tag {tag.ID}: Skipping anchor processing - filtered pose not yet initialized"
+                    );
+                }
+                continue; // Skip this tag until filtered pose is ready
+            }
+
             // Calculate confidence based on corner quality and detection stability
             var confidence = CalculateDetectionConfidence(tag);
 
@@ -1226,24 +1263,9 @@ public class AprilTagController : MonoBehaviour
                 );
             }
 
-            // Get the filtered pose for this tag
-            Vector3 worldPosition;
-            Quaternion worldRotation;
-
-            if (
-                m_filteredPoses.TryGetValue(tag.ID, out var filteredPose)
-                && filteredPose.IsInitialized
-            )
-            {
-                worldPosition = filteredPose.FilteredPosition;
-                worldRotation = filteredPose.FilteredRotation;
-            }
-            else
-            {
-                // Fallback to raw pose if no filtered pose available
-                worldPosition = m_transforms.CalculateWorldPosition(tag);
-                worldRotation = m_transforms.CalculateWorldRotation(tag);
-            }
+            // Use the stable filtered pose for anchor placement
+            var worldPosition = filteredPose.FilteredPosition;
+            var worldRotation = filteredPose.FilteredRotation;
 
             // Process the tag detection for spatial anchor creation
             m_spatialAnchorManager.ProcessTagDetection(

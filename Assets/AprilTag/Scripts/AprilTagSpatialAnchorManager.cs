@@ -29,7 +29,7 @@ namespace AprilTag
 
         [Tooltip("Number of consecutive high-confidence detections required before placing anchor")]
         [SerializeField]
-        private int m_requiredStableFrames = 2; // Reduced for easier placement
+        private int m_requiredStableFrames = 8; // Increased to allow pose smoothing to stabilize
 
         [Tooltip("Maximum time to wait for stable detection before giving up (seconds)")]
         [SerializeField]
@@ -375,6 +375,11 @@ namespace AprilTag
                 }
             }
 
+            // Check if position has moved significantly since last frame
+            // This prevents anchors from being placed while position is still stabilizing
+            var positionDelta = Vector3.Distance(position, state.LastPosition);
+            var hasSignificantMovement = positionDelta > 0.05f; // 5cm threshold
+
             // Update state with current detection
             state.LastDetectionTime = Time.time;
             state.LastPosition = position;
@@ -396,13 +401,27 @@ namespace AprilTag
             // Check if we should increment stable frame count
             if (confidence >= m_minConfidenceThreshold)
             {
-                state.StableFrameCount++;
-
-                if (m_enableDebugLogging && Time.frameCount % 60 == 0) // Log every 60 frames (1 second at 60fps)
+                // Only increment if position hasn't moved significantly
+                if (hasSignificantMovement && state.StableFrameCount > 0)
                 {
-                    Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Tag {tagId}: {state.StableFrameCount}/{m_requiredStableFrames} stable frames, confidence: {confidence:F3} (threshold: {m_minConfidenceThreshold:F3})"
-                    );
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            $"[AprilTagSpatialAnchorManager] Tag {tagId}: Position moved {positionDelta:F3}m, resetting stable frames (was {state.StableFrameCount})"
+                        );
+                    }
+                    state.StableFrameCount = 0; // Reset if position is still moving
+                }
+                else
+                {
+                    state.StableFrameCount++;
+
+                    if (m_enableDebugLogging && Time.frameCount % 60 == 0) // Log every 60 frames (1 second at 60fps)
+                    {
+                        Debug.Log(
+                            $"[AprilTagSpatialAnchorManager] Tag {tagId}: {state.StableFrameCount}/{m_requiredStableFrames} stable frames, confidence: {confidence:F3}, position delta: {positionDelta:F3}m"
+                        );
+                    }
                 }
             }
             else

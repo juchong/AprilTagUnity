@@ -189,10 +189,10 @@ MonoBehaviour:
     EnableHistogramEqualization: 1
     HistogramStrength: 0.4
     EnableNoiseReduction: 1
-    BlurRadius: 1
+    BlurRadius: 2
     BlurSigma: 0.5
     EnableEdgeEnhancement: 0
-    EdgeStrength: 0.8
+    EdgeStrength: 0.3
     UseHalfPrecision: 1
     EnableDownsampling: 0
     DownsampleFactor: 0.5
@@ -209,13 +209,13 @@ MonoBehaviour:
   m_verboseDebugLogInterval: 100
   m_cornerQualityLogInterval: 180
   m_enablePoseSmoothing: 1
-  m_positionSmoothingTime: 0.1
-  m_rotationSmoothingTime: 0.15
+  m_positionSmoothingTime: 0.05
+  m_rotationSmoothingTime: 0.1
   m_enableMultiFrameValidation: 1
   m_validationFrameCount: 3
   m_maxPositionDeviation: 0.2
   m_maxRotationDeviation: 30
-  m_enableCornerQualityAssessment: 0
+  m_enableCornerQualityAssessment: 1
   m_minCornerQuality: 0.3
   m_minCornerSideLength: 5
   m_maxCornerSideLength: 500
@@ -227,7 +227,7 @@ MonoBehaviour:
   m_nonConvexQualityPenalty: 0.3
   m_enableSpatialAnchors: 1
   m_spatialAnchorManager: {fileID: 1220006292}
-  m_anchorConfidenceThreshold: 0.1
+  m_anchorConfidenceThreshold: 0.3
   m_validationRecentDetectionTime: 1
   m_singleDetectionConfidence: 0.5
   m_distanceQualityDecayFactor: 0.01
