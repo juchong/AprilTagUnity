@@ -45,11 +45,23 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private Camera m_referenceCamera;
 
-    [Tooltip("Offset to apply to tag positions (useful for calibration)")]
+    // POSITION OFFSET: Global position offset applied to ALL tags when using fallback (non-corner-based) positioning
+    // - Only applies when corner-based positioning fails and system falls back to direct pose approach
+    // - Added to tag's camera-space position before converting to world space
+    // - Use when all tags appear consistently shifted in the same direction (system-wide calibration)
+    // - Does NOT save to PlayerPrefs
+    [Tooltip("Global offset for fallback positioning only (when corner-based fails). Use for system-wide position calibration.")]
     [SerializeField]
     private Vector3 m_positionOffset = Vector3.zero;
 
-    [Tooltip("Additional offset for corner-based positioning to correct alignment")]
+    // CORNER POSITION OFFSET: Specific offset applied ONLY to corner-based positioning (primary/preferred method)
+    // - Applied directly to final world position AFTER all corner calculations and raycasting
+    // - Saves to PlayerPrefs for persistence across sessions
+    // - Can be adjusted at runtime using Quest controllers when m_enableConfigurationTool is enabled
+    //   * Right A Button: Move right/left (hold grip for left)
+    //   * Right B Button: Move up/down (hold grip for down)
+    // - This is your PRIMARY calibration tool for Quest deployment
+    [Tooltip("Offset for corner-based positioning (primary method). Saves to PlayerPrefs. Adjustable at runtime with Quest controllers when configuration tool enabled.")]
     [SerializeField]
     private Vector3 m_cornerPositionOffset = new(0.000f, 0.000f, 0.000f);
 
@@ -57,7 +69,13 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private bool m_saveRuntimeOffset = true;
 
-    [Tooltip("Rotation offset to apply to tag rotations (useful for calibration)")]
+    // ROTATION OFFSET: Euler angle offset applied to tag rotations (both corner-based and fallback methods)
+    // - Multiplied into world rotation quaternion after converting Vector3 Euler angles
+    // - Applied to BOTH positioning methods when m_enableRotationOffset is true
+    // - Use for correcting systematic rotation errors (e.g., tags mounted at 90° intervals)
+    // - Use for camera coordinate system alignment with Unity world space
+    // - Does NOT save to PlayerPrefs
+    [Tooltip("Rotation offset (Euler angles) applied to all tag rotations. Use for correcting systematic rotation errors or camera alignment.")]
     [SerializeField]
     private Vector3 m_rotationOffset = Vector3.zero;
 
