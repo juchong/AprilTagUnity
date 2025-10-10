@@ -3,6 +3,7 @@
 // Transforms headset pose from Quest space to FRC field coordinates
 
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace AprilTag
@@ -439,7 +440,12 @@ namespace AprilTag
             if (!m_isAligned || m_fieldOrigin == null || Camera.main == null)
                 return Vector3.zero;
 
-            return m_fieldOrigin.InverseTransformPoint(Camera.main.transform.position);
+            var fieldPos = m_fieldOrigin.InverseTransformPoint(Camera.main.transform.position);
+
+            // Log to adb for Quest debugging
+            Debug.Log($"[FieldPos] {fieldPos.x:F3},{fieldPos.y:F3},{fieldPos.z:F3}");
+
+            return fieldPos;
         }
 
         /// <summary>

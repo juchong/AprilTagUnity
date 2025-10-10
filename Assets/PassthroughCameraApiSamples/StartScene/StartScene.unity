@@ -2020,6 +2020,64 @@ Transform:
   - {fileID: 1255498465}
   m_Father: {fileID: 788071739}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &370915502
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 370915504}
+  - component: {fileID: 370915503}
+  m_Layer: 0
+  m_Name: FRCFieldLocalizer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &370915503
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 370915502}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6ae8e3c40f2c5b14e980b26e66d014e3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AprilTag.FRCFieldLocalizer
+  m_anchorManager: {fileID: 0}
+  m_fieldLayout:
+    fieldName: 2025-reefscape
+    fieldSize: {x: 16.54175, y: 8.21055}
+    tags: []
+  m_fieldLayoutName: 2025-reefscape
+  m_minAnchors: 3
+  m_autoAlign: 1
+  m_persistAlignment: 1
+  m_maxAlignmentError: 0.5
+  m_enableOutlierRejection: 1
+  m_maxOutlierError: 0.3
+  m_enableDebug: 1
+  m_visualizeField: 1
+--- !u!4 &370915504
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 370915502}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: -0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &382589665
 GameObject:
   m_ObjectHideFlags: 0
@@ -11881,3 +11939,4 @@ SceneRoots:
   - {fileID: 1393492504}
   - {fileID: 1619708785}
   - {fileID: 213524149}
+  - {fileID: 370915504}

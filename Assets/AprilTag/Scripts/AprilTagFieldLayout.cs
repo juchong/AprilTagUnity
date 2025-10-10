@@ -224,9 +224,9 @@ namespace AprilTag
                     // Validate position is within reasonable field bounds
                     if (
                         unityPos.x < -1f
-                        || unityPos.x > wpilibData.fieldLength + 1f
+                        || unityPos.x > wpilibData.field.length + 1f
                         || unityPos.z < -1f
-                        || unityPos.z > wpilibData.fieldWidth + 1f
+                        || unityPos.z > wpilibData.field.width + 1f
                         || unityPos.y < -1f
                         || unityPos.y > 5f
                     )
