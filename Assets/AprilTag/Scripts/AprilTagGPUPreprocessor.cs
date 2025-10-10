@@ -33,7 +33,9 @@ namespace AprilTag
             public float HistogramStrength = 0.4f; // Increased for better effect
 
             [Header("Noise Reduction")]
-            [Tooltip("Enable Gaussian blur for noise reduction - Improves corner detection by reducing false corners from noise")]
+            [Tooltip(
+                "Enable Gaussian blur for noise reduction - Improves corner detection by reducing false corners from noise"
+            )]
             public bool EnableNoiseReduction = true; // Replaces need for corner quality filtering
 
             [Range(1, 5)]
@@ -45,7 +47,9 @@ namespace AprilTag
             public float BlurSigma = 0.5f; // Balanced for noise reduction without losing corners
 
             [Header("Edge Enhancement")]
-            [Tooltip("Enable edge enhancement for sharper tag borders - Improves corner sharpness (use carefully, can introduce artifacts)")]
+            [Tooltip(
+                "Enable edge enhancement for sharper tag borders - Improves corner sharpness (use carefully, can introduce artifacts)"
+            )]
             public bool EnableEdgeEnhancement = false; // Enable only if corners are not sharp enough
 
             [Range(0f, 2f)]
@@ -112,10 +116,15 @@ namespace AprilTag
         public float LastProcessingTimeMs => _lastProcessingTime;
         public bool IsInitialized => _isInitialized;
 
-        public AprilTagGPUPreprocessor(int width, int height, PreprocessingSettings settings = null, 
-            int maxWidth = 1920, int maxHeight = 1080,
+        public AprilTagGPUPreprocessor(
+            int width,
+            int height,
+            PreprocessingSettings settings = null,
+            int maxWidth = 1920,
+            int maxHeight = 1080,
             string preprocessorShaderPath = "AprilTagPreprocessor",
-            string histogramShaderPath = "AprilTagHistogram")
+            string histogramShaderPath = "AprilTagHistogram"
+        )
         {
             m_width = width;
             m_height = height;

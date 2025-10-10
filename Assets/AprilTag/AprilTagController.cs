@@ -50,7 +50,9 @@ public class AprilTagController : MonoBehaviour
     // - Added to tag's camera-space position before converting to world space
     // - Use when all tags appear consistently shifted in the same direction (system-wide calibration)
     // - Does NOT save to PlayerPrefs
-    [Tooltip("Global offset for fallback positioning only (when corner-based fails). Use for system-wide position calibration.")]
+    [Tooltip(
+        "Global offset for fallback positioning only (when corner-based fails). Use for system-wide position calibration."
+    )]
     [SerializeField]
     private Vector3 m_positionOffset = Vector3.zero;
 
@@ -61,7 +63,9 @@ public class AprilTagController : MonoBehaviour
     //   * Right A Button: Move right/left (hold grip for left)
     //   * Right B Button: Move up/down (hold grip for down)
     // - This is your PRIMARY calibration tool for Quest deployment
-    [Tooltip("Offset for corner-based positioning (primary method). Saves to PlayerPrefs. Adjustable at runtime with Quest controllers when configuration tool enabled.")]
+    [Tooltip(
+        "Offset for corner-based positioning (primary method). Saves to PlayerPrefs. Adjustable at runtime with Quest controllers when configuration tool enabled."
+    )]
     [SerializeField]
     private Vector3 m_cornerPositionOffset = new(0.030f, 0.010f, 0.000f);
 
@@ -75,7 +79,9 @@ public class AprilTagController : MonoBehaviour
     // - Use for correcting systematic rotation errors (e.g., tags mounted at 90° intervals)
     // - Use for camera coordinate system alignment with Unity world space
     // - Does NOT save to PlayerPrefs
-    [Tooltip("Rotation offset (Euler angles) applied to all tag rotations. Use for correcting systematic rotation errors or camera alignment.")]
+    [Tooltip(
+        "Rotation offset (Euler angles) applied to all tag rotations. Use for correcting systematic rotation errors or camera alignment."
+    )]
     [SerializeField]
     private Vector3 m_rotationOffset = Vector3.zero;
 
@@ -368,6 +374,28 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private float m_minimumConfidenceThreshold = 0.1f;
 
+    [Tooltip(
+        "Place spatial anchors at the exact center of tags (subtracting the corner position offset)"
+    )]
+    [SerializeField]
+    private bool m_placeAnchorsAtTagCenter = true;
+
+    [Header("Keep Out Zone Settings")]
+    [Tooltip("Multiplier for keep out zone radius based on tag size (e.g., 0.3 = 0.3x tag size)")]
+    [Range(0.1f, 2.0f)]
+    [SerializeField]
+    private float m_keepOutZoneMultiplier = 0.3f;
+
+    [Tooltip("Minimum keep out zone radius in meters (prevents too small zones)")]
+    [Range(0.01f, 0.5f)]
+    [SerializeField]
+    private float m_minKeepOutRadius = 0.02f;
+
+    [Tooltip("Maximum keep out zone radius in meters (prevents too large zones)")]
+    [Range(0.1f, 1.0f)]
+    [SerializeField]
+    private float m_maxKeepOutRadius = 0.1f;
+
     [Tooltip("Runtime calibration step size")]
     [SerializeField]
     private float m_runtimeCalibrationStep = 0.01f;
@@ -577,13 +605,8 @@ public class AprilTagController : MonoBehaviour
         // Configure the spatial anchor manager
         if (m_spatialAnchorManager != null)
         {
-            // Use reflection to set the confidence threshold
-            var managerType = typeof(AprilTagSpatialAnchorManager);
-            var confidenceField = managerType.GetField(
-                "minConfidenceThreshold",
-                BindingFlags.NonPublic | BindingFlags.Instance
-            );
-            confidenceField?.SetValue(m_spatialAnchorManager, m_anchorConfidenceThreshold);
+            // Set debug logging state
+            m_spatialAnchorManager.EnableDebugLogging = m_enableAllDebugLogging;
 
             // CRITICAL: Subscribe to anchor events for visualization
             // This allows us to create visualizations for loaded anchors on startup
@@ -592,7 +615,10 @@ public class AprilTagController : MonoBehaviour
             if (m_enableAllDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTag] Spatial anchor manager initialized with confidence threshold: {m_anchorConfidenceThreshold}"
+                    $"[AprilTag] Spatial anchor manager initialized - "
+                        + $"confidence threshold: {m_anchorConfidenceThreshold}, "
+                        + $"keep-out zone: {m_keepOutZoneMultiplier}x tag size "
+                        + $"(min: {m_minKeepOutRadius}m, max: {m_maxKeepOutRadius}m)"
                 );
                 Debug.Log("[AprilTag] Subscribed to OnAnchorCreated event for visualizations");
             }
@@ -606,7 +632,9 @@ public class AprilTagController : MonoBehaviour
     {
         if (anchor == null || anchor.gameObject == null)
         {
-            Debug.LogWarning($"[AprilTag] OnSpatialAnchorCreated called with null anchor for tag {tagId}");
+            Debug.LogWarning(
+                $"[AprilTag] OnSpatialAnchorCreated called with null anchor for tag {tagId}"
+            );
             return;
         }
 
@@ -622,7 +650,9 @@ public class AprilTagController : MonoBehaviour
         {
             if (m_enableAllDebugLogging)
             {
-                Debug.Log($"[AprilTag] Visualization already exists for tag {tagId}, skipping creation");
+                Debug.Log(
+                    $"[AprilTag] Visualization already exists for tag {tagId}, skipping creation"
+                );
             }
             return;
         }
@@ -667,7 +697,7 @@ public class AprilTagController : MonoBehaviour
     {
         // Unsubscribe from events
         AprilTagSpatialAnchorManager.OnAnchorCreated -= OnSpatialAnchorCreated;
-        
+
         // Dispose detector resources
         DisposeDetector();
 
@@ -1344,7 +1374,14 @@ public class AprilTagController : MonoBehaviour
                 worldPosition,
                 worldRotation,
                 confidence,
-                m_tagSizeMeters
+                m_tagSizeMeters,
+                m_cornerPositionOffset,
+                m_placeAnchorsAtTagCenter,
+                m_anchorConfidenceThreshold,
+                m_keepOutZoneMultiplier,
+                m_minKeepOutRadius,
+                m_maxKeepOutRadius,
+                m_enableAllDebugLogging
             );
         }
 

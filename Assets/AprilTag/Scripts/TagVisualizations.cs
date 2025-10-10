@@ -10,24 +10,36 @@ using UnityEngine;
 public class TagVisualizations : MonoBehaviour
 {
     [Header("Auto Generation")]
-    [Tooltip("Automatically generate and assign visualization template on Start")] 
-    [SerializeField] private bool autoGenerateOnStart = true;
+    [Tooltip("Automatically generate and assign visualization template on Start")]
+    [SerializeField]
+    private bool autoGenerateOnStart = true;
 
-    [Tooltip("Name for the generated visualization template GameObject")] 
-    [SerializeField] private string templateName = "RuntimeTagVizTemplate";
+    [Tooltip("Name for the generated visualization template GameObject")]
+    [SerializeField]
+    private string templateName = "RuntimeTagVizTemplate";
 
     [Header("Template Appearance")]
-    [Tooltip("Base color of the tag body")] 
-    [SerializeField] private Color bodyColor = new Color(1.0f, 0.0f, 0.0f, 0.5f); // flat red, 50% alpha
+    [Tooltip("Base color of the tag body")]
+    [SerializeField]
+    private Color bodyColor = new Color(1.0f, 0.0f, 0.0f, 0.5f); // flat red, 50% alpha
 
-    [Tooltip("Add XYZ axes gizmos to the visualization")] 
-    [SerializeField] private bool addAxes = false;
+    [Tooltip("Add XYZ axes gizmos to the visualization")]
+    [SerializeField]
+    private bool addAxes = false;
 
-    [Tooltip("Relative length of axis gizmos (scaled by tag size later)")] 
-    [SerializeField] private float axisLength = 0.5f;
+    [Tooltip("Relative length of axis gizmos (scaled by tag size later)")]
+    [SerializeField]
+    private float axisLength = 0.5f;
 
     private void Start()
     {
+        // Ensure bodyColor has transparency
+        if (bodyColor.a >= 1f)
+        {
+            Debug.LogWarning($"[TagVisualizations] Body color alpha was {bodyColor.a}, setting to 0.5 for transparency");
+            bodyColor = new Color(bodyColor.r, bodyColor.g, bodyColor.b, 0.5f);
+        }
+        
         if (autoGenerateOnStart)
         {
             GenerateAndAssign();
@@ -61,13 +73,17 @@ public class TagVisualizations : MonoBehaviour
 
         if (prefabField == null)
         {
-            Debug.LogError("[AprilTagVisualizations] Could not find m_tagVizPrefab on AprilTagController.");
+            Debug.LogError(
+                "[AprilTagVisualizations] Could not find m_tagVizPrefab on AprilTagController."
+            );
             Destroy(template);
             return;
         }
 
         prefabField.SetValue(controller, template);
-        Debug.Log($"[TagVisualizations] Assigned runtime visualization template '{template.name}' to AprilTagController.");
+        Debug.Log(
+            $"[TagVisualizations] Assigned runtime visualization template '{template.name}' to AprilTagController."
+        );
     }
 
     private GameObject BuildSimpleTagVisualization()
@@ -82,24 +98,57 @@ public class TagVisualizations : MonoBehaviour
         body.transform.localRotation = Quaternion.identity;
         body.transform.localScale = new Vector3(1f, 1f, 1f); // flat; scaled later by controller
 
+        // Disable collider to avoid depth issues
+        var collider = body.GetComponent<Collider>();
+        if (collider != null)
+        {
+            Destroy(collider);
+        }
+        
         var bodyRenderer = body.GetComponent<MeshRenderer>();
         if (bodyRenderer != null)
         {
-            // Try to use an unlit/color shader for clean transparency
-            var shader = Shader.Find("Unlit/Color");
+            // Priority order: shaders that definitely support transparency
+            Shader shader = null;
+            string[] shaderNames = {
+                "Sprites/Default",  // This definitely supports transparency
+                "Unlit/Transparent",
+                "Legacy Shaders/Transparent/Diffuse",
+                "Mobile/Particles/Alpha Blended",
+                "UI/Default",  // UI shaders always support transparency
+                "Unlit/Color"
+            };
+            
+            foreach (var shaderName in shaderNames)
+            {
+                shader = Shader.Find(shaderName);
+                if (shader != null)
+                {
+                    Debug.Log($"[TagVisualizations] Found shader: {shaderName}");
+                    break;
+                }
+            }
+            
+            // If no shader found, create a basic transparent one
             if (shader == null)
             {
-                shader = Shader.Find("Sprites/Default");
+                Debug.LogWarning("[TagVisualizations] No suitable shader found, using Standard shader");
+                shader = Shader.Find("Standard");
             }
-            if (shader == null)
+            
+            // Create material
+            var mat = new Material(shader);
+            
+            // For Standard shader, explicitly set to transparent mode
+            if (shader.name.Contains("Standard"))
             {
-                shader = bodyRenderer.sharedMaterial != null ? bodyRenderer.sharedMaterial.shader : null;
+                mat.SetFloat("_Mode", 3); // 3 = Transparent
+                mat.SetOverrideTag("RenderType", "Transparent");
+                mat.SetFloat("_Metallic", 0f);
+                mat.SetFloat("_Glossiness", 0f);
             }
-
-            var mat = shader != null ? new Material(shader) : new Material(bodyRenderer.sharedMaterial);
-            mat.color = bodyColor;
-
-            // Ensure proper alpha blending
+            
+            // Set blend mode for transparency
             mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
             mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             mat.SetInt("_ZWrite", 0);
@@ -107,27 +156,72 @@ public class TagVisualizations : MonoBehaviour
             mat.EnableKeyword("_ALPHABLEND_ON");
             mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-
-            // URP support: mark as transparent surface if property exists
-            if (mat.HasProperty("_Surface"))
+            
+            // Apply color with all possible property names
+            mat.color = bodyColor;
+            if (mat.HasProperty("_Color"))
             {
-                mat.SetFloat("_Surface", 1f); // 0=Opaque, 1=Transparent
+                mat.SetColor("_Color", bodyColor);
             }
-
+            if (mat.HasProperty("_TintColor"))
+            {
+                mat.SetColor("_TintColor", bodyColor);
+            }
+            if (mat.HasProperty("_BaseColor"))
+            {
+                mat.SetColor("_BaseColor", bodyColor);
+            }
+            
+            // For particle/sprite shaders
+            if (mat.HasProperty("_MainTex"))
+            {
+                mat.SetTexture("_MainTex", Texture2D.whiteTexture);
+            }
+            
             bodyRenderer.material = mat;
+            
+            // Configure renderer for transparency
+            bodyRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            bodyRenderer.receiveShadows = false;
+            
+            // Force material to update
+            bodyRenderer.enabled = false;
+            bodyRenderer.enabled = true;
+            
+            // Extensive debugging
+            Debug.Log($"[TagVisualizations] Material setup complete:");
+            Debug.Log($"  Shader: {shader.name}");
+            Debug.Log($"  Color: RGBA({bodyColor.r}, {bodyColor.g}, {bodyColor.b}, {bodyColor.a})");
+            Debug.Log($"  Material color: RGBA({mat.color.r}, {mat.color.g}, {mat.color.b}, {mat.color.a})");
+            Debug.Log($"  Render queue: {mat.renderQueue}");
+            Debug.Log($"  Keywords: {string.Join(", ", mat.shaderKeywords)}");
         }
 
         if (addAxes)
         {
             AddAxis(root.transform, Color.red, Vector3.right, new Vector3(0.5f, 0f, 0f), 90f);
             AddAxis(root.transform, Color.green, Vector3.up, new Vector3(0f, 0.5f, 0f), 0f);
-            AddAxis(root.transform, Color.blue, Vector3.forward, new Vector3(0f, 0f, 0.5f), 0f, true);
+            AddAxis(
+                root.transform,
+                Color.blue,
+                Vector3.forward,
+                new Vector3(0f, 0f, 0.5f),
+                0f,
+                true
+            );
         }
 
         return root;
     }
 
-    private void AddAxis(Transform parent, Color color, Vector3 axisDir, Vector3 localEndPos, float xRot, bool zAxis = false)
+    private void AddAxis(
+        Transform parent,
+        Color color,
+        Vector3 axisDir,
+        Vector3 localEndPos,
+        float xRot,
+        bool zAxis = false
+    )
     {
         // Cylinder points up (Y); rotate for X/Z as needed
         var cyl = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -176,5 +270,3 @@ public class TagVisualizations : MonoBehaviour
         host.AddComponent<TagVisualizations>();
     }
 }
-
-
