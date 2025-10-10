@@ -667,13 +667,30 @@ public class AprilTagController : MonoBehaviour
         }
 
         // Instantiate visualization
+        if (m_enableAllDebugLogging)
+        {
+            Debug.Log($"[AprilTag] Instantiating visualization prefab for tag {tagId}");
+        }
+
         var vizTransform = Instantiate(m_tagVizPrefab).transform;
         vizTransform.name = $"AprilTag_{tagId}_Loaded";
+
+        if (m_enableAllDebugLogging)
+        {
+            Debug.Log(
+                $"[AprilTag] Visualization instantiated: {vizTransform.name}, active: {vizTransform.gameObject.activeSelf}"
+            );
+        }
 
         // Configure visualization to ignore occlusion
         if (m_visualizationHelper != null)
         {
             m_visualizationHelper.ConfigureVisualizationForNoOcclusion(vizTransform);
+
+            if (m_enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Configured visualization for no occlusion");
+            }
         }
 
         // Parent the visualization to the anchor so it moves with it
@@ -688,7 +705,10 @@ public class AprilTagController : MonoBehaviour
         if (m_enableAllDebugLogging)
         {
             Debug.Log(
-                $"[AprilTag] Created visualization for loaded anchor tag {tagId} at {anchor.transform.position}"
+                $"[AprilTag] Created visualization for loaded anchor tag {tagId} at {anchor.transform.position}. "
+                    + $"Parent: {anchor.gameObject.name}, "
+                    + $"Viz local pos: {vizTransform.localPosition}, scale: {vizTransform.localScale}, "
+                    + $"Total tracked visualizations: {m_vizById.Count}"
             );
         }
     }

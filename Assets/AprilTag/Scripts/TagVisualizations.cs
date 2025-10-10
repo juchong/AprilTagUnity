@@ -36,10 +36,12 @@ public class TagVisualizations : MonoBehaviour
         // Ensure bodyColor has transparency
         if (bodyColor.a >= 1f)
         {
-            Debug.LogWarning($"[TagVisualizations] Body color alpha was {bodyColor.a}, setting to 0.5 for transparency");
+            Debug.LogWarning(
+                $"[TagVisualizations] Body color alpha was {bodyColor.a}, setting to 0.5 for transparency"
+            );
             bodyColor = new Color(bodyColor.r, bodyColor.g, bodyColor.b, 0.5f);
         }
-        
+
         if (autoGenerateOnStart)
         {
             GenerateAndAssign();
@@ -104,21 +106,22 @@ public class TagVisualizations : MonoBehaviour
         {
             Destroy(collider);
         }
-        
+
         var bodyRenderer = body.GetComponent<MeshRenderer>();
         if (bodyRenderer != null)
         {
             // Priority order: shaders that definitely support transparency
             Shader shader = null;
-            string[] shaderNames = {
-                "Sprites/Default",  // This definitely supports transparency
+            string[] shaderNames =
+            {
+                "Sprites/Default", // This definitely supports transparency
                 "Unlit/Transparent",
                 "Legacy Shaders/Transparent/Diffuse",
                 "Mobile/Particles/Alpha Blended",
-                "UI/Default",  // UI shaders always support transparency
-                "Unlit/Color"
+                "UI/Default", // UI shaders always support transparency
+                "Unlit/Color",
             };
-            
+
             foreach (var shaderName in shaderNames)
             {
                 shader = Shader.Find(shaderName);
@@ -128,17 +131,19 @@ public class TagVisualizations : MonoBehaviour
                     break;
                 }
             }
-            
+
             // If no shader found, create a basic transparent one
             if (shader == null)
             {
-                Debug.LogWarning("[TagVisualizations] No suitable shader found, using Standard shader");
+                Debug.LogWarning(
+                    "[TagVisualizations] No suitable shader found, using Standard shader"
+                );
                 shader = Shader.Find("Standard");
             }
-            
+
             // Create material
             var mat = new Material(shader);
-            
+
             // For Standard shader, explicitly set to transparent mode
             if (shader.name.Contains("Standard"))
             {
@@ -147,7 +152,7 @@ public class TagVisualizations : MonoBehaviour
                 mat.SetFloat("_Metallic", 0f);
                 mat.SetFloat("_Glossiness", 0f);
             }
-            
+
             // Set blend mode for transparency
             mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
             mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
@@ -156,7 +161,7 @@ public class TagVisualizations : MonoBehaviour
             mat.EnableKeyword("_ALPHABLEND_ON");
             mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-            
+
             // Apply color with all possible property names
             mat.color = bodyColor;
             if (mat.HasProperty("_Color"))
@@ -171,28 +176,30 @@ public class TagVisualizations : MonoBehaviour
             {
                 mat.SetColor("_BaseColor", bodyColor);
             }
-            
+
             // For particle/sprite shaders
             if (mat.HasProperty("_MainTex"))
             {
                 mat.SetTexture("_MainTex", Texture2D.whiteTexture);
             }
-            
+
             bodyRenderer.material = mat;
-            
+
             // Configure renderer for transparency
             bodyRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             bodyRenderer.receiveShadows = false;
-            
+
             // Force material to update
             bodyRenderer.enabled = false;
             bodyRenderer.enabled = true;
-            
+
             // Extensive debugging
             Debug.Log($"[TagVisualizations] Material setup complete:");
             Debug.Log($"  Shader: {shader.name}");
             Debug.Log($"  Color: RGBA({bodyColor.r}, {bodyColor.g}, {bodyColor.b}, {bodyColor.a})");
-            Debug.Log($"  Material color: RGBA({mat.color.r}, {mat.color.g}, {mat.color.b}, {mat.color.a})");
+            Debug.Log(
+                $"  Material color: RGBA({mat.color.r}, {mat.color.g}, {mat.color.b}, {mat.color.a})"
+            );
             Debug.Log($"  Render queue: {mat.renderQueue}");
             Debug.Log($"  Keywords: {string.Join(", ", mat.shaderKeywords)}");
         }
