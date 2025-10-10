@@ -50,6 +50,7 @@ public class TagVisualizations : MonoBehaviour
 
     /// <summary>
     /// Generates the visualization template and assigns it to AprilTagController (m_tagVizPrefab).
+    /// Also generates and assigns an anchor prefab to the SpatialAnchorSpawnerBuildingBlock.
     /// </summary>
     public void GenerateAndAssign()
     {
@@ -85,6 +86,99 @@ public class TagVisualizations : MonoBehaviour
         prefabField.SetValue(controller, template);
         Debug.Log(
             $"[TagVisualizations] Assigned runtime visualization template '{template.name}' to AprilTagController."
+        );
+
+        // Also generate and assign anchor prefab to the building block
+        GenerateAndAssignAnchorPrefab();
+    }
+
+    /// <summary>
+    /// Generates an anchor prefab similar to DemoAnchorPlacementBuildingBlock and assigns it
+    /// to the SpatialAnchorSpawnerBuildingBlock
+    /// </summary>
+    private void GenerateAndAssignAnchorPrefab()
+    {
+        // Find the spatial anchor spawner building block
+        var spawner =
+            FindFirstObjectByType<Meta.XR.BuildingBlocks.SpatialAnchorSpawnerBuildingBlock>();
+        if (spawner == null)
+        {
+            Debug.LogWarning(
+                "[TagVisualizations] No SpatialAnchorSpawnerBuildingBlock found in scene."
+            );
+            return;
+        }
+
+        // Create anchor prefab: root with a simple cube visualization
+        var anchorPrefab = new GameObject("RuntimeAnchorPrefab");
+
+        // Add a cube child for visualization
+        var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cube.name = "Visualization";
+        cube.transform.SetParent(anchorPrefab.transform, false);
+        cube.transform.localPosition = Vector3.zero;
+        cube.transform.localRotation = Quaternion.identity;
+        cube.transform.localScale = new Vector3(0.1f, 0.1f, 0.1f); // 10cm cube
+
+        // Remove collider (not needed for visualization)
+        var collider = cube.GetComponent<Collider>();
+        if (collider != null)
+        {
+            Destroy(collider);
+        }
+
+        // Create a material with semi-transparent cyan color
+        var renderer = cube.GetComponent<MeshRenderer>();
+        if (renderer != null)
+        {
+            // Try to find a suitable transparent shader
+            Shader shader = Shader.Find("Sprites/Default");
+            if (shader == null)
+            {
+                shader = Shader.Find("Standard");
+            }
+
+            var mat = new Material(shader);
+
+            // Set color: cyan with 50% transparency
+            Color anchorColor = new Color(0f, 1f, 1f, 0.5f); // cyan
+
+            // For Standard shader, explicitly set to transparent mode
+            if (shader.name.Contains("Standard"))
+            {
+                mat.SetFloat("_Mode", 3); // 3 = Transparent
+                mat.SetOverrideTag("RenderType", "Transparent");
+                mat.SetFloat("_Metallic", 0f);
+                mat.SetFloat("_Glossiness", 0.3f);
+            }
+
+            // Set blend mode for transparency
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetInt("_ZWrite", 0);
+            mat.EnableKeyword("_ALPHABLEND_ON");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+
+            // Apply color
+            mat.color = anchorColor;
+            if (mat.HasProperty("_Color"))
+            {
+                mat.SetColor("_Color", anchorColor);
+            }
+
+            renderer.material = mat;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+        }
+
+        // Keep prefab hidden; spawner will instantiate it
+        anchorPrefab.SetActive(false);
+
+        // Assign to spawner
+        spawner.AnchorPrefab = anchorPrefab;
+
+        Debug.Log(
+            $"[TagVisualizations] Generated and assigned runtime anchor prefab to SpatialAnchorSpawnerBuildingBlock"
         );
     }
 

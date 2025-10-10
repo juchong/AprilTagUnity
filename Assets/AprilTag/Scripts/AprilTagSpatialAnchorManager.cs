@@ -3,6 +3,7 @@
 // Integrates with Meta XR Building Blocks for controller-based anchor management
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Meta.XR.BuildingBlocks;
@@ -55,6 +56,10 @@ namespace AprilTag
 
         // Property to store debug logging state from controller
         public bool EnableDebugLogging { get; set; } = false;
+
+        // Anchor save queue to prevent concurrent saves
+        private readonly Queue<OVRSpatialAnchor> m_anchorSaveQueue = new();
+        private bool m_isSavingAnchor = false;
 
         // Events
         public static event Action<int, OVRSpatialAnchor> OnAnchorCreated;
@@ -180,15 +185,17 @@ namespace AprilTag
                 if (EnableDebugLogging)
                 {
                     Debug.Log(
-                        "[AprilTagSpatialAnchorManager] Loading saved anchors from default local storage..."
+                        "[AprilTagSpatialAnchorManager] Loading saved anchors using explicit UUIDs from PlayerPrefs..."
+                    );
+                    Debug.Log(
+                        $"[AprilTagSpatialAnchorManager] Current tracked anchors before load: {m_anchorsById.Count}"
                     );
                 }
 
-                // Load anchors from default local storage
-                m_spatialAnchorLoader.LoadAnchorsFromDefaultLocalStorage();
-
-                // Wait a moment and check if callback was triggered
-                yield return new WaitForSeconds(2.0f);
+                // Load anchors using explicit UUIDs from PlayerPrefs
+                // This avoids the 4-anchor limit of LoadAnchorsFromDefaultLocalStorage()
+                // Wait for the loading process to complete
+                yield return LoadAnchorsFromPlayerPrefsCoroutine();
 
                 if (EnableDebugLogging)
                 {
@@ -742,8 +749,8 @@ namespace AprilTag
                     // Save UUID to tag ID mapping for persistence
                     SaveUuidToTagIdMapping(anchor.Uuid, tagId);
 
-                    // Save the anchor to local storage for persistence
-                    SaveAnchorToLocalStorage(anchor);
+                    // Queue the anchor for saving to prevent concurrent save issues
+                    QueueAnchorForSave(anchor);
 
                     // Update keep out zone at the anchor's actual position with normal radius
                     // First restore the original (non-temporary) multiplier
@@ -1215,7 +1222,7 @@ namespace AprilTag
         /// <summary>
         /// Erase a specific anchor from Meta storage and tracking
         /// </summary>
-        public async void EraseAnchor(OVRSpatialAnchor anchor)
+        public void EraseAnchor(OVRSpatialAnchor anchor)
         {
             if (anchor == null)
             {
@@ -1223,6 +1230,14 @@ namespace AprilTag
                 return;
             }
 
+            StartCoroutine(EraseAnchorCoroutine(anchor));
+        }
+
+        /// <summary>
+        /// Coroutine to erase an anchor from Meta storage
+        /// </summary>
+        private IEnumerator EraseAnchorCoroutine(OVRSpatialAnchor anchor)
+        {
             var tagId = GetTagIdForAnchor(anchor);
 
             if (EnableDebugLogging)
@@ -1232,57 +1247,57 @@ namespace AprilTag
                 );
             }
 
-            try
+            // Start the erase operation
+            var eraseTask = anchor.EraseAnchorAsync();
+
+            // Wait for completion without blocking (OVRTask pattern)
+            while (!eraseTask.IsCompleted)
             {
-                // Erase from Meta storage
-                var eraseResult = await anchor.EraseAnchorAsync();
+                yield return null;
+            }
 
-                if (eraseResult.Success)
+            // Get result from OVRTask
+            var eraseResult = eraseTask.GetResult();
+
+            if (eraseResult.Success)
+            {
+                // Remove from tracking
+                if (tagId >= 0)
                 {
-                    // Remove from tracking
-                    if (tagId >= 0)
-                    {
-                        m_anchorsById.Remove(tagId);
-                        m_placementStates.Remove(tagId);
-                        RemoveKeepOutZone(tagId);
-                    }
-                    m_anchorGuidToTagId.Remove(anchor.Uuid);
-
-                    // Remove from PlayerPrefs
-                    var key = $"AprilTag_UUID_{anchor.Uuid}";
-                    if (PlayerPrefs.HasKey(key))
-                    {
-                        PlayerPrefs.DeleteKey(key);
-                        PlayerPrefs.Save();
-                    }
-
-                    if (EnableDebugLogging)
-                    {
-                        Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Successfully erased anchor for tag {tagId}"
-                        );
-                    }
-
-                    // Fire event
-                    OnAnchorRemoved?.Invoke(tagId);
-
-                    // Destroy the GameObject
-                    if (anchor.gameObject != null)
-                    {
-                        Destroy(anchor.gameObject);
-                    }
+                    m_anchorsById.Remove(tagId);
+                    m_placementStates.Remove(tagId);
+                    RemoveKeepOutZone(tagId);
                 }
-                else
+                m_anchorGuidToTagId.Remove(anchor.Uuid);
+
+                // Remove from PlayerPrefs
+                var key = $"AprilTag_UUID_{anchor.Uuid}";
+                if (PlayerPrefs.HasKey(key))
                 {
-                    Debug.LogError(
-                        $"[AprilTagSpatialAnchorManager] Failed to erase anchor for tag {tagId}: {eraseResult.Status}"
+                    PlayerPrefs.DeleteKey(key);
+                    PlayerPrefs.Save();
+                }
+
+                if (EnableDebugLogging)
+                {
+                    Debug.Log(
+                        $"[AprilTagSpatialAnchorManager] Successfully erased anchor for tag {tagId}"
                     );
                 }
+
+                // Fire event
+                OnAnchorRemoved?.Invoke(tagId);
+
+                // Destroy the GameObject
+                if (anchor.gameObject != null)
+                {
+                    Destroy(anchor.gameObject);
+                }
             }
-            catch (System.Exception ex)
+            else
             {
                 Debug.LogError(
-                    $"[AprilTagSpatialAnchorManager] Exception erasing anchor: {ex.Message}"
+                    $"[AprilTagSpatialAnchorManager] Failed to erase anchor for tag {tagId}: {eraseResult.Status}"
                 );
             }
         }
@@ -1398,11 +1413,18 @@ namespace AprilTag
 
         /// <summary>
         /// Save UUID to tag ID mapping in PlayerPrefs for persistence
+        /// Stores bidirectional mapping for efficient lookup
         /// </summary>
         private void SaveUuidToTagIdMapping(Guid uuid, int tagId)
         {
-            var key = $"AprilTag_UUID_{uuid}";
-            PlayerPrefs.SetInt(key, tagId);
+            // Save UUID -> TagID mapping (for reverse lookup)
+            var uuidKey = $"AprilTag_UUID_{uuid}";
+            PlayerPrefs.SetInt(uuidKey, tagId);
+
+            // Save TagID -> UUID mapping (for loading anchors on startup)
+            var tagIdKey = $"AprilTag_TagID_{tagId}";
+            PlayerPrefs.SetString(tagIdKey, uuid.ToString());
+
             PlayerPrefs.Save();
 
             if (EnableDebugLogging)
@@ -1441,49 +1463,400 @@ namespace AprilTag
         }
 
         /// <summary>
-        /// Save an anchor to local storage for persistence across sessions
+        /// Load anchors by explicitly querying UUIDs stored in PlayerPrefs
+        /// This bypasses the LoadAnchorsFromDefaultLocalStorage() 4-anchor limit
+        /// Uses callback-based API with coroutine for non-blocking execution
         /// </summary>
-        private async void SaveAnchorToLocalStorage(OVRSpatialAnchor anchor)
+        private IEnumerator LoadAnchorsFromPlayerPrefsCoroutine()
         {
-            if (anchor == null)
+            // Collect all stored UUIDs from PlayerPrefs
+            var uuidsToLoad = new System.Collections.Generic.List<System.Guid>();
+
+            // Check for common tag IDs (0-50 should be more than enough)
+            for (int tagId = 0; tagId <= 50; tagId++)
             {
-                Debug.LogError("[AprilTagSpatialAnchorManager] Cannot save null anchor");
-                return;
+                string key = $"AprilTag_TagID_{tagId}";
+                if (PlayerPrefs.HasKey(key))
+                {
+                    string uuidString = PlayerPrefs.GetString(key);
+                    if (System.Guid.TryParse(uuidString, out System.Guid uuid))
+                    {
+                        uuidsToLoad.Add(uuid);
+
+                        if (EnableDebugLogging)
+                        {
+                            Debug.Log(
+                                $"[AprilTagSpatialAnchorManager] Found saved UUID for Tag {tagId}: {uuid}"
+                            );
+                        }
+                    }
+                }
+            }
+
+            if (uuidsToLoad.Count == 0)
+            {
+                if (EnableDebugLogging)
+                {
+                    Debug.Log(
+                        "[AprilTagSpatialAnchorManager] No anchors found in PlayerPrefs to load"
+                    );
+                }
+                yield break;
             }
 
             if (EnableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Saving anchor '{anchor.gameObject.name}' to local storage..."
+                    $"[AprilTagSpatialAnchorManager] Loading {uuidsToLoad.Count} anchors from PlayerPrefs UUIDs..."
                 );
             }
 
-            // Save anchor to local storage using the new async API
-            try
-            {
-                var saveResult = await anchor.SaveAnchorAsync();
+            // Track completion without blocking
+            bool loadComplete = false;
+            object lockObj = new object();
+            int localizedCount = 0;
 
-                if (saveResult.Success)
+#pragma warning disable CS0618 // Type or member is obsolete
+            var loadOptions = new OVRSpatialAnchor.LoadOptions { Uuids = uuidsToLoad };
+
+            OVRSpatialAnchor.LoadUnboundAnchors(
+                loadOptions,
+                (unboundAnchors) =>
                 {
+                    if (unboundAnchors == null || unboundAnchors.Length == 0)
+                    {
+                        if (EnableDebugLogging)
+                        {
+                            Debug.LogWarning(
+                                $"[AprilTagSpatialAnchorManager] No anchors were loaded from storage (requested {uuidsToLoad.Count} UUIDs)"
+                            );
+                        }
+                        lock (lockObj)
+                        {
+                            loadComplete = true;
+                        }
+                        return;
+                    }
+
                     if (EnableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Successfully saved anchor '{anchor.gameObject.name}' to local storage (UUID: {anchor.Uuid})"
+                            $"[AprilTagSpatialAnchorManager] Loaded {unboundAnchors.Length} unbound anchors (requested {uuidsToLoad.Count}), localizing..."
+                        );
+                    }
+
+                    int totalToLocalize = unboundAnchors.Length;
+
+                    foreach (var unboundAnchor in unboundAnchors)
+                    {
+                        // Store the UUID from the unbound anchor before localization
+                        var anchorUuid = unboundAnchor.Uuid;
+
+                        unboundAnchor.Localize(
+                            (localizedUnbound, success) =>
+                            {
+                                if (success)
+                                {
+                                    // Create a GameObject for this anchor and bind it
+                                    var anchorObject = new GameObject(
+                                        $"AprilTagAnchor_Loaded_{anchorUuid}"
+                                    );
+                                    var spatialAnchor =
+                                        anchorObject.AddComponent<OVRSpatialAnchor>();
+
+                                    // Bind the unbound anchor to the GameObject
+                                    localizedUnbound.BindTo(spatialAnchor);
+
+                                    // Register the anchor
+                                    int tagId = LoadTagIdFromUuid(anchorUuid);
+                                    if (tagId >= 0)
+                                    {
+                                        // Rename to match the tag
+                                        anchorObject.name = $"AprilTagAnchor_Tag{tagId}";
+
+                                        m_anchorsById[tagId] = spatialAnchor;
+
+                                        if (!m_placementStates.ContainsKey(tagId))
+                                        {
+                                            m_placementStates[tagId] = new AnchorPlacementState(
+                                                tagId
+                                            );
+                                        }
+                                        m_placementStates[tagId].IsPlaced = true;
+                                        m_placementStates[tagId].LastPosition = spatialAnchor
+                                            .transform
+                                            .position;
+
+                                        // Instantiate the visualization from the spawner's prefab as a child
+                                        if (
+                                            m_spatialAnchorSpawner != null
+                                            && m_spatialAnchorSpawner.AnchorPrefab != null
+                                        )
+                                        {
+                                            var prefab = m_spatialAnchorSpawner.AnchorPrefab;
+
+                                            // Copy visual components from the prefab if it has children
+                                            if (prefab.transform.childCount > 0)
+                                            {
+                                                foreach (Transform child in prefab.transform)
+                                                {
+                                                    var visualChild = Instantiate(
+                                                        child.gameObject,
+                                                        anchorObject.transform
+                                                    );
+                                                    visualChild.transform.localPosition =
+                                                        Vector3.zero;
+                                                    visualChild.transform.localRotation =
+                                                        Quaternion.identity;
+                                                }
+
+                                                if (EnableDebugLogging)
+                                                {
+                                                    Debug.Log(
+                                                        $"[AprilTagSpatialAnchorManager] Instantiated visualization for loaded Tag {tagId} anchor"
+                                                    );
+                                                }
+                                            }
+                                        }
+
+                                        if (EnableDebugLogging)
+                                        {
+                                            Debug.Log(
+                                                $"[AprilTagSpatialAnchorManager] Successfully loaded and bound Tag {tagId} anchor at {spatialAnchor.transform.position}"
+                                            );
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    Debug.LogWarning(
+                                        $"[AprilTagSpatialAnchorManager] Failed to localize anchor with UUID {anchorUuid}"
+                                    );
+                                }
+
+                                bool shouldComplete = false;
+                                lock (lockObj)
+                                {
+                                    localizedCount++;
+
+                                    if (localizedCount >= totalToLocalize)
+                                    {
+                                        shouldComplete = true;
+                                    }
+                                }
+
+                                if (shouldComplete)
+                                {
+                                    lock (lockObj)
+                                    {
+                                        loadComplete = true;
+                                    }
+                                }
+                            }
                         );
                     }
                 }
-                else
+            );
+#pragma warning restore CS0618 // Type or member is obsolete
+
+            // Non-blocking wait - yield every frame until complete
+            while (true)
+            {
+                bool isDone;
+                lock (lockObj)
                 {
-                    Debug.LogError(
-                        $"[AprilTagSpatialAnchorManager] Failed to save anchor '{anchor.gameObject.name}' to local storage. "
-                            + $"Success: {saveResult.Success}, Status: {saveResult.Status}"
+                    isDone = loadComplete;
+                }
+
+                if (isDone)
+                    break;
+
+                yield return null; // Wait one frame
+            }
+
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Finished loading anchors from PlayerPrefs. Total loaded: {m_anchorsById.Count}"
+                );
+            }
+        }
+
+        /// <summary>
+        /// Queue an anchor for saving to prevent concurrent save issues
+        /// </summary>
+        private void QueueAnchorForSave(OVRSpatialAnchor anchor)
+        {
+            if (anchor == null)
+                return;
+
+            m_anchorSaveQueue.Enqueue(anchor);
+
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Queued anchor '{anchor.gameObject.name}' for saving (queue size: {m_anchorSaveQueue.Count})"
+                );
+            }
+
+            // Start processing the queue if not already running
+            if (!m_isSavingAnchor)
+            {
+                StartCoroutine(ProcessAnchorSaveQueueCoroutine());
+            }
+        }
+
+        /// <summary>
+        /// Process the anchor save queue one at a time to prevent concurrent saves
+        /// </summary>
+        private IEnumerator ProcessAnchorSaveQueueCoroutine()
+        {
+            m_isSavingAnchor = true;
+
+            // Keep processing as long as there are items in the queue
+            // This prevents restarting the processor and potential race conditions
+            while (true)
+            {
+                // Check if queue is empty
+                if (m_anchorSaveQueue.Count == 0)
+                {
+                    // Wait briefly to see if more items arrive
+                    yield return new WaitForSeconds(0.1f);
+
+                    // If still empty, we're done
+                    if (m_anchorSaveQueue.Count == 0)
+                    {
+                        break;
+                    }
+                }
+
+                var anchor = m_anchorSaveQueue.Dequeue();
+
+                if (anchor != null)
+                {
+                    // Save the anchor and wait for it to complete
+                    // SaveAnchorToLocalStorageCoroutine now properly waits for anchor.Created
+                    yield return SaveAnchorToLocalStorageCoroutine(anchor);
+
+                    // Small delay between saves to avoid overwhelming the SDK
+                    yield return new WaitForSeconds(0.1f);
+                }
+            }
+
+            // CRITICAL: Give Meta's SDK time to flush the last anchor to persistent storage
+            // Even after SaveAnchorAsync reports success, the SDK needs time to commit
+            // This is especially important for the last anchor in a batch
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] All anchors saved, waiting for Meta SDK to flush to disk..."
+                );
+            }
+
+            yield return new WaitForSeconds(1.0f);
+
+            m_isSavingAnchor = false;
+
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Finished processing anchor save queue (processed until empty)"
+                );
+            }
+        }
+
+        /// <summary>
+        /// Save an anchor to local storage for persistence across sessions
+        /// </summary>
+        private IEnumerator SaveAnchorToLocalStorageCoroutine(OVRSpatialAnchor anchor)
+        {
+            if (anchor == null)
+            {
+                Debug.LogError("[AprilTagSpatialAnchorManager] Cannot save null anchor");
+                yield break;
+            }
+
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Saving anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) to local storage..."
+                );
+            }
+
+            // Wait for anchor to be fully created AND localized before saving
+            // This is CRITICAL - anchors must be both created and localized to persist correctly
+            // Reference: Unity-StarterSamples SpatialAnchor example emphasizes checking Localized status
+            float maxWaitTime = 5.0f; // Wait up to 5 seconds for localization
+            float waitedTime = 0f;
+            float checkInterval = 0.05f; // Check every 50ms
+
+            while ((!anchor.Created || !anchor.Localized) && waitedTime < maxWaitTime)
+            {
+                yield return new WaitForSeconds(checkInterval);
+                waitedTime += checkInterval;
+
+                // Log progress for slow localization
+                if (
+                    Mathf.FloorToInt(waitedTime) > Mathf.FloorToInt(waitedTime - checkInterval)
+                    && EnableDebugLogging
+                )
+                {
+                    Debug.Log(
+                        $"[AprilTagSpatialAnchorManager] Waiting for anchor '{anchor.gameObject.name}' localization... ({waitedTime:F1}s, created={anchor.Created}, localized={anchor.Localized})"
                     );
                 }
             }
-            catch (System.Exception ex)
+
+            if (!anchor.Created)
             {
                 Debug.LogError(
-                    $"[AprilTagSpatialAnchorManager] Exception while saving anchor '{anchor.gameObject.name}': {ex.Message}\n{ex.StackTrace}"
+                    $"[AprilTagSpatialAnchorManager] Anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) was not created after waiting {waitedTime:F1}s. Cannot save."
+                );
+                yield break;
+            }
+
+            if (!anchor.Localized)
+            {
+                Debug.LogError(
+                    $"[AprilTagSpatialAnchorManager] Anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) created but NOT LOCALIZED after {waitedTime:F1}s. "
+                        + $"Skipping save - unlocalized anchors will not persist across sessions."
+                );
+                yield break;
+            }
+
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Anchor '{anchor.gameObject.name}' fully ready (created={anchor.Created}, localized={anchor.Localized}) after {waitedTime:F1}s, proceeding to save..."
+                );
+            }
+
+            // Save anchor to local storage using OVRTask pattern
+            var saveTask = anchor.SaveAnchorAsync();
+
+            // Wait for the task to complete without blocking (OVRTask pattern)
+            while (!saveTask.IsCompleted)
+            {
+                yield return null;
+            }
+
+            // Get result from OVRTask
+            var saveResult = saveTask.GetResult();
+
+            if (EnableDebugLogging)
+            {
+                // Always log the full result for debugging
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Save result for anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}): "
+                        + $"Success={saveResult.Success}, Status={saveResult.Status}"
+                );
+            }
+
+            if (!saveResult.Success)
+            {
+                Debug.LogError(
+                    $"[AprilTagSpatialAnchorManager] Failed to save anchor '{anchor.gameObject.name}' to local storage. "
+                        + $"Success: {saveResult.Success}, Status: {saveResult.Status}"
                 );
             }
         }

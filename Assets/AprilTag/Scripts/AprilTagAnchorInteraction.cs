@@ -438,11 +438,7 @@ namespace AprilTag
             }
 
             // Haptic feedback
-            OVRInput.SetControllerVibration(
-                0.5f,
-                0.1f,
-                GetControllerFromTransform(controller)
-            );
+            OVRInput.SetControllerVibration(0.5f, 0.1f, GetControllerFromTransform(controller));
         }
 
         private void UpdateGrabbedAnchor(Transform controller, OVRInput.Controller controllerType)
