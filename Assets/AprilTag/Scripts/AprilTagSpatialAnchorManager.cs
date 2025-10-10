@@ -1157,6 +1157,187 @@ namespace AprilTag
         }
 
         /// <summary>
+        /// Get all tracked spatial anchors
+        /// </summary>
+        public List<OVRSpatialAnchor> GetAllAnchors()
+        {
+            return m_anchorsById.Values.Where(a => a != null).ToList();
+        }
+
+        /// <summary>
+        /// Get tag ID for a given spatial anchor
+        /// </summary>
+        public int GetTagIdForAnchor(OVRSpatialAnchor anchor)
+        {
+            if (anchor == null)
+                return -1;
+
+            if (m_anchorGuidToTagId.TryGetValue(anchor.Uuid, out var tagId))
+            {
+                return tagId;
+            }
+
+            // Fallback: search by reference
+            foreach (var kvp in m_anchorsById)
+            {
+                if (kvp.Value == anchor)
+                {
+                    return kvp.Key;
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// Update anchor mapping after manual repositioning
+        /// </summary>
+        public void UpdateAnchorMapping(int tagId, OVRSpatialAnchor anchor)
+        {
+            if (anchor == null)
+                return;
+
+            // Update the mapping
+            m_anchorGuidToTagId[anchor.Uuid] = tagId;
+            m_anchorsById[tagId] = anchor;
+
+            // Save UUID mapping to PlayerPrefs
+            SaveUuidToTagIdMapping(anchor.Uuid, tagId);
+
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Updated anchor mapping for tag {tagId} at position {anchor.transform.position}"
+                );
+            }
+        }
+
+        /// <summary>
+        /// Erase a specific anchor from Meta storage and tracking
+        /// </summary>
+        public async void EraseAnchor(OVRSpatialAnchor anchor)
+        {
+            if (anchor == null)
+            {
+                Debug.LogWarning("[AprilTagSpatialAnchorManager] Cannot erase null anchor");
+                return;
+            }
+
+            var tagId = GetTagIdForAnchor(anchor);
+
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Erasing anchor for tag {tagId} (UUID: {anchor.Uuid})"
+                );
+            }
+
+            try
+            {
+                // Erase from Meta storage
+                var eraseResult = await anchor.EraseAnchorAsync();
+
+                if (eraseResult.Success)
+                {
+                    // Remove from tracking
+                    if (tagId >= 0)
+                    {
+                        m_anchorsById.Remove(tagId);
+                        m_placementStates.Remove(tagId);
+                        RemoveKeepOutZone(tagId);
+                    }
+                    m_anchorGuidToTagId.Remove(anchor.Uuid);
+
+                    // Remove from PlayerPrefs
+                    var key = $"AprilTag_UUID_{anchor.Uuid}";
+                    if (PlayerPrefs.HasKey(key))
+                    {
+                        PlayerPrefs.DeleteKey(key);
+                        PlayerPrefs.Save();
+                    }
+
+                    if (EnableDebugLogging)
+                    {
+                        Debug.Log(
+                            $"[AprilTagSpatialAnchorManager] Successfully erased anchor for tag {tagId}"
+                        );
+                    }
+
+                    // Fire event
+                    OnAnchorRemoved?.Invoke(tagId);
+
+                    // Destroy the GameObject
+                    if (anchor.gameObject != null)
+                    {
+                        Destroy(anchor.gameObject);
+                    }
+                }
+                else
+                {
+                    Debug.LogError(
+                        $"[AprilTagSpatialAnchorManager] Failed to erase anchor for tag {tagId}: {eraseResult.Status}"
+                    );
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError(
+                    $"[AprilTagSpatialAnchorManager] Exception erasing anchor: {ex.Message}"
+                );
+            }
+        }
+
+        /// <summary>
+        /// Erase all AprilTag anchors from Meta storage and tracking
+        /// </summary>
+        public void EraseAllAnchors()
+        {
+            if (EnableDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTagSpatialAnchorManager] Erasing all {m_anchorsById.Count} AprilTag anchors"
+                );
+            }
+
+            // Use the building block to erase all anchors
+            if (m_spatialAnchorCore != null)
+            {
+                m_spatialAnchorCore.EraseAllAnchors();
+
+                // Clear local tracking immediately
+                var anchorGuids = m_anchorGuidToTagId.Keys.ToList();
+                m_anchorsById.Clear();
+                m_anchorGuidToTagId.Clear();
+                m_placementStates.Clear();
+                m_keepOutZones.Clear();
+
+                // Remove all from PlayerPrefs
+                foreach (var guid in anchorGuids)
+                {
+                    var key = $"AprilTag_UUID_{guid}";
+                    if (PlayerPrefs.HasKey(key))
+                    {
+                        PlayerPrefs.DeleteKey(key);
+                    }
+                }
+                PlayerPrefs.Save();
+
+                if (EnableDebugLogging)
+                {
+                    Debug.Log(
+                        "[AprilTagSpatialAnchorManager] All anchors erased and tracking cleared"
+                    );
+                }
+            }
+            else
+            {
+                Debug.LogError(
+                    "[AprilTagSpatialAnchorManager] Cannot erase anchors - SpatialAnchorCoreBuildingBlock not available"
+                );
+            }
+        }
+
+        /// <summary>
         /// Create a temporary anchor prefab with tag ID in the name
         /// </summary>
         private GameObject CreateTaggedAnchorPrefab(int tagId, GameObject originalPrefab)
