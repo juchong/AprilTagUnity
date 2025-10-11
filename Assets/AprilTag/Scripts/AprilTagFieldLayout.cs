@@ -3,6 +3,7 @@
 // Loads and manages the official FRC field layout with tag positions
 
 using System;
+using System.IO;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -110,14 +111,72 @@ namespace AprilTag
         /// </summary>
         public static AprilTagFieldLayout LoadFromResources(string fieldName)
         {
-            var textAsset = Resources.Load<TextAsset>($"FieldLayouts/{fieldName}");
+            if (string.IsNullOrWhiteSpace(fieldName))
+            {
+                Debug.LogError("[AprilTagFieldLayout] Field layout name is empty");
+                return null;
+            }
+
+            // Normalize: allow names with or without .json extension
+            fieldName = fieldName.Trim();
+            if (fieldName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                fieldName = Path.GetFileNameWithoutExtension(fieldName);
+            }
+
+            // Try common resource paths
+            TextAsset textAsset = null;
+            var candidatePaths = new string[]
+            {
+                $"FieldLayouts/{fieldName}", // preferred subfolder
+                fieldName // root of Resources
+            };
+
+            foreach (var path in candidatePaths)
+            {
+                textAsset = Resources.Load<TextAsset>(path);
+                if (textAsset != null)
+                {
+                    break;
+                }
+            }
+
             if (textAsset == null)
             {
                 Debug.LogError(
-                    $"[AprilTagFieldLayout] Could not find field layout: Resources/FieldLayouts/{fieldName}.json"
+                    $"[AprilTagFieldLayout] Could not find field layout: 'FieldLayouts/{fieldName}.json' or '{fieldName}.json' in a Resources folder"
                 );
+                // List available layouts to help debugging (both FieldLayouts/ and root)
+                var availableInSubdir = Resources.LoadAll<TextAsset>("FieldLayouts");
+                var availableInRoot = Resources.LoadAll<TextAsset>(string.Empty);
+
+                if ((availableInSubdir != null && availableInSubdir.Length > 0) || (availableInRoot != null && availableInRoot.Length > 0))
+                {
+                    var names = string.Empty;
+                    if (availableInSubdir != null)
+                    {
+                        for (int i = 0; i < availableInSubdir.Length; i++)
+                        {
+                            if (names.Length > 0) names += ", ";
+                            names += availableInSubdir[i].name;
+                        }
+                    }
+                    if (availableInRoot != null)
+                    {
+                        for (int i = 0; i < availableInRoot.Length; i++)
+                        {
+                            // Avoid duplicates
+                            if (!names.Contains(availableInRoot[i].name))
+                            {
+                                if (names.Length > 0) names += ", ";
+                                names += availableInRoot[i].name;
+                            }
+                        }
+                    }
+                    Debug.LogError($"[AprilTagFieldLayout] Available layouts: {names}");
+                }
                 Debug.LogError(
-                    $"[AprilTagFieldLayout] Please add the WPILib JSON file to Assets/Resources/FieldLayouts/"
+                    $"[AprilTagFieldLayout] Please add the WPILib JSON file under any Resources folder, e.g., 'Assets/AprilTag/Resources/FieldLayouts/{fieldName}.json'"
                 );
                 return null;
             }
