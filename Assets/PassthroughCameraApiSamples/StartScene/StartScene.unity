@@ -440,7 +440,7 @@ MonoBehaviour:
   m_nonConvexQualityPenalty: 0.3
   m_enableSpatialAnchors: 1
   m_spatialAnchorManager: {fileID: 1220006292}
-  m_anchorConfidenceThreshold: 0.3
+  m_anchorConfidenceThreshold: 0.24
   m_validationRecentDetectionTime: 1
   m_singleDetectionConfidence: 0.5
   m_distanceQualityDecayFactor: 0.01
@@ -2054,13 +2054,14 @@ MonoBehaviour:
     fieldName: 2025-reefscape
     fieldSize: {x: 16.54175, y: 8.21055}
     tags: []
-  m_fieldLayoutName: 2025-reefscape
+  m_fieldLayoutName: 2025-reefscape-welded
   m_minAnchors: 3
   m_autoAlign: 1
   m_persistAlignment: 1
-  m_maxAlignmentError: 0.5
-  m_enableOutlierRejection: 1
-  m_maxOutlierError: 0.3
+  m_useEmbeddedLayout: 1
+  m_maxAlignmentError: 100
+  m_enableOutlierRejection: 0
+  m_maxOutlierError: 100
   m_enableDebug: 1
   m_visualizeField: 1
 --- !u!4 &370915504
@@ -6748,9 +6749,16 @@ MonoBehaviour:
   m_GameObject: {fileID: 1220006291}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4abdb0d1226869740a8dc89f48c695eb, type: 3}
+  m_Script: {fileID: 11500000, guid: cc12522647e6017489f22cc81f9e6657, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  m_enableSpatialAnchors: 1
+  m_requiredStableFrames: 8
+  m_maxDetectionTimeout: 30
+  m_spatialAnchorSpawner: {fileID: 0}
+  m_spatialAnchorLoader: {fileID: 0}
+  m_spatialAnchorCore: {fileID: 0}
+  m_enableKeepOutZone: 1
 --- !u!4 &1220006293
 Transform:
   m_ObjectHideFlags: 0
