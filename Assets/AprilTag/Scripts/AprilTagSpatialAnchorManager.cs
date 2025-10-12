@@ -306,8 +306,12 @@ namespace AprilTag
 
         private void Update()
         {
-            // Clean up stale placement states
-            CleanupStalePlacementStates();
+            // PERFORMANCE FIX: Clean up stale placement states infrequently (once per second)
+            // Was running every frame (72-90 FPS) causing LINQ allocation pressure
+            if (Time.frameCount % 72 == 0) // ~1 second at 72 FPS
+            {
+                CleanupStalePlacementStates();
+            }
 
             // Clean up expired keep out zones (every 30 seconds)
             if (Time.frameCount % 1800 == 0) // 30 seconds at 60 FPS

@@ -388,7 +388,8 @@ MonoBehaviour:
   m_tagFamily: 1
   m_tagSizeMeters: 0.165
   m_decimate: 4
-  m_maxDetectionsPerSecond: 120
+  m_maxDetectionsPerSecond: 15
+  m_useAsyncDetection: 1
   m_horizontalFovDeg: 78
   m_enablePositionOffset: 1
   m_enableRotationOffset: 1
