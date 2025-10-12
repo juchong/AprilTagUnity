@@ -387,7 +387,7 @@ MonoBehaviour:
   m_visualizationScaleMultiplier: 1
   m_tagFamily: 1
   m_tagSizeMeters: 0.165
-  m_decimate: 4
+  m_decimate: 2
   m_maxDetectionsPerSecond: 15
   m_useAsyncDetection: 1
   m_horizontalFovDeg: 78

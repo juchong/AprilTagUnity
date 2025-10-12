@@ -48,14 +48,27 @@ namespace AprilTag
         [SerializeField]
         private bool m_enableKeepOutZone = true;
 
+        [Header("Debug Logging")]
+        [Tooltip("Enable debug logging for spatial anchor operations")]
+        [SerializeField]
+        private bool m_enableDebugLogging = false;
+
+        [Tooltip("Frame interval for debug logs (higher = less frequent)")]
+        [SerializeField]
+        private int m_logInterval = 300;
+
         // Core data structures
         private Dictionary<int, OVRSpatialAnchor> m_anchorsById = new();
         private Dictionary<int, AnchorPlacementState> m_placementStates = new();
         private Dictionary<int, KeepOutZone> m_keepOutZones = new();
         private Dictionary<Guid, int> m_anchorGuidToTagId = new(); // Map anchor GUID to tag ID
 
-        // Property to store debug logging state from controller
-        public bool EnableDebugLogging { get; set; } = false;
+        // Property for external access (compatibility)
+        public bool m_enableDebugLogging
+        {
+            get => m_enableDebugLogging;
+            set => m_enableDebugLogging = value;
+        }
 
         // Anchor save queue to prevent concurrent saves
         private readonly Queue<OVRSpatialAnchor> m_anchorSaveQueue = new();
@@ -159,10 +172,10 @@ namespace AprilTag
             // Subscribe to building block events
             SubscribeToBuildingBlockEvents();
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Initialized - anchor management enabled: {m_enableSpatialAnchors}, "
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Initialized - anchor management enabled: {m_enableSpatialAnchors}, "
                         + $"required stable frames: {m_requiredStableFrames}, timeout: {m_maxDetectionTimeout:F1}s"
                 );
             }
@@ -182,13 +195,13 @@ namespace AprilTag
 
             if (m_spatialAnchorLoader != null)
             {
-                if (EnableDebugLogging)
+                if (m_enableDebugLogging)
                 {
                     Debug.Log(
-                        "[AprilTagSpatialAnchorManager] Loading saved anchors using explicit UUIDs from PlayerPrefs..."
+                        "[AprilTagSpatialAnchorManagerSpatialAnchorManager] Loading saved anchors using explicit UUIDs from PlayerPrefs..."
                     );
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Current tracked anchors before load: {m_anchorsById.Count}"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Current tracked anchors before load: {m_anchorsById.Count}"
                     );
                 }
 
@@ -197,10 +210,10 @@ namespace AprilTag
                 // Wait for the loading process to complete
                 yield return LoadAnchorsFromPlayerPrefsCoroutine();
 
-                if (EnableDebugLogging)
+                if (m_enableDebugLogging)
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] After load attempt: {m_anchorsById.Count} anchors tracked. "
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] After load attempt: {m_anchorsById.Count} anchors tracked. "
                             + $"If this is 0 and you expect anchors, they may not have been saved previously."
                     );
                 }
@@ -208,7 +221,7 @@ namespace AprilTag
             else
             {
                 Debug.LogWarning(
-                    "[AprilTagSpatialAnchorManager] Cannot load anchors - SpatialAnchorLoaderBuildingBlock not found"
+                    "[AprilTagSpatialAnchorManagerSpatialAnchorManager] Cannot load anchors - SpatialAnchorLoaderBuildingBlock not found"
                 );
             }
         }
@@ -231,7 +244,7 @@ namespace AprilTag
                 if (m_spatialAnchorSpawner == null)
                 {
                     Debug.LogWarning(
-                        "[AprilTagSpatialAnchorManager] SpatialAnchorSpawnerBuildingBlock not found"
+                        "[AprilTagSpatialAnchorManagerSpatialAnchorManager] SpatialAnchorSpawnerBuildingBlock not found"
                     );
                 }
             }
@@ -242,7 +255,7 @@ namespace AprilTag
                 if (m_spatialAnchorLoader == null)
                 {
                     Debug.LogWarning(
-                        "[AprilTagSpatialAnchorManager] SpatialAnchorLoaderBuildingBlock not found"
+                        "[AprilTagSpatialAnchorManagerSpatialAnchorManager] SpatialAnchorLoaderBuildingBlock not found"
                     );
                 }
             }
@@ -253,7 +266,7 @@ namespace AprilTag
                 if (m_spatialAnchorCore == null)
                 {
                     Debug.LogWarning(
-                        "[AprilTagSpatialAnchorManager] SpatialAnchorCoreBuildingBlock not found"
+                        "[AprilTagSpatialAnchorManagerSpatialAnchorManager] SpatialAnchorCoreBuildingBlock not found"
                     );
                 }
             }
@@ -360,7 +373,7 @@ namespace AprilTag
                 {
                     var anchor = m_anchorsById[tagId];
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Tag {tagId}: Anchor already exists at {anchor?.transform.position}, skipping. "
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Tag {tagId}: Anchor already exists at {anchor?.transform.position}, skipping. "
                             + $"Total anchors: {m_anchorsById.Count}"
                     );
                 }
@@ -371,7 +384,7 @@ namespace AprilTag
             if (enableDebugLogging && Time.frameCount % 30 == 0)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Processing tag {tagId} with confidence {confidence:F3}, "
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Processing tag {tagId} with confidence {confidence:F3}, "
                         + $"threshold: {confidenceThreshold:F3}"
                 );
             }
@@ -393,7 +406,7 @@ namespace AprilTag
                 if (enableDebugLogging)
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Started tracking tag {tagId} for anchor placement"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Started tracking tag {tagId} for anchor placement"
                             + $" (already placed: {state.IsPlaced})"
                     );
                 }
@@ -405,7 +418,7 @@ namespace AprilTag
                 if (enableDebugLogging && Time.frameCount % 300 == 0) // Log occasionally
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Tag {tagId}: Anchor already "
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Tag {tagId}: Anchor already "
                             + $"{(state.IsPlaced ? "placed" : "being placed")}, skipping"
                     );
                 }
@@ -428,7 +441,7 @@ namespace AprilTag
                     if (enableDebugLogging && Time.frameCount % 60 == 0) // Log less frequently
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Tag {tagId}: Position {checkPosition} is within keep out zone, "
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Tag {tagId}: Position {checkPosition} is within keep out zone, "
                                 + "skipping processing"
                         );
                     }
@@ -502,18 +515,18 @@ namespace AprilTag
                 {
                     m_placementStates.Remove(tagId);
 
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Removed placement state for unplaced tag {tagId}"
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Removed placement state for unplaced tag {tagId}"
                         );
                     }
                 }
                 // Only log occasionally for placed anchors to avoid spam
-                else if (EnableDebugLogging && Time.frameCount % 300 == 0)
+                else if (m_enableDebugLogging && Time.frameCount % 300 == 0)
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Tag {tagId} tracking: placed={state.IsPlaced}, "
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Tag {tagId} tracking: placed={state.IsPlaced}, "
                             + $"has anchor={hasAnchor}, in progress={state.IsPlacementInProgress}"
                     );
                 }
@@ -548,7 +561,7 @@ namespace AprilTag
             if (enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] CreateAnchorForTag called for tag {tagId} at position {position}"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] CreateAnchorForTag called for tag {tagId} at position {position}"
                 );
             }
 
@@ -556,7 +569,7 @@ namespace AprilTag
             if (!m_placementStates.TryGetValue(tagId, out var state))
             {
                 Debug.LogError(
-                    $"[AprilTagSpatialAnchorManager] No placement state for tag {tagId}"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] No placement state for tag {tagId}"
                 );
                 return;
             }
@@ -567,7 +580,7 @@ namespace AprilTag
                 if (enableDebugLogging)
                 {
                     Debug.LogWarning(
-                        $"[AprilTagSpatialAnchorManager] Anchor already exists for tag {tagId}, skipping creation"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor already exists for tag {tagId}, skipping creation"
                     );
                 }
                 return;
@@ -579,7 +592,7 @@ namespace AprilTag
                 if (enableDebugLogging)
                 {
                     Debug.LogWarning(
-                        $"[AprilTagSpatialAnchorManager] Anchor creation already in progress for tag {tagId}, skipping"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor creation already in progress for tag {tagId}, skipping"
                     );
                 }
                 return;
@@ -591,7 +604,7 @@ namespace AprilTag
                 if (enableDebugLogging)
                 {
                     Debug.LogWarning(
-                        $"[AprilTagSpatialAnchorManager] Anchor already placed for tag {tagId}, skipping creation"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor already placed for tag {tagId}, skipping creation"
                     );
                 }
                 return;
@@ -609,7 +622,7 @@ namespace AprilTag
             if (enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Placing anchor at position: {anchorPosition}"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Placing anchor at position: {anchorPosition}"
                 );
             }
 
@@ -630,7 +643,7 @@ namespace AprilTag
             if (enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Created temporary keep-out zone for tag {tagId} "
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Created temporary keep-out zone for tag {tagId} "
                         + $"at {anchorPosition} with radius {tempRadius:F3}m to prevent duplicates"
                 );
             }
@@ -666,14 +679,14 @@ namespace AprilTag
                 if (enableDebugLogging)
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Requested anchor spawn for tag {tagId} via building block at {position}"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Requested anchor spawn for tag {tagId} via building block at {position}"
                     );
                 }
             }
             else
             {
                 Debug.LogError(
-                    "[AprilTagSpatialAnchorManager] SpatialAnchorSpawnerBuildingBlock not available for anchor creation"
+                    "[AprilTagSpatialAnchorManagerSpatialAnchorManager] SpatialAnchorSpawnerBuildingBlock not available for anchor creation"
                 );
                 state.IsPlacementInProgress = false;
             }
@@ -735,10 +748,10 @@ namespace AprilTag
                         var oldName = anchor.gameObject.name;
                         anchor.gameObject.name = $"AprilTagAnchor_Tag{tagId}";
 
-                        if (EnableDebugLogging)
+                        if (m_enableDebugLogging)
                         {
                             Debug.Log(
-                                $"[AprilTagSpatialAnchorManager] Renamed anchor from '{oldName}' to '{anchor.gameObject.name}'"
+                                $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Renamed anchor from '{oldName}' to '{anchor.gameObject.name}'"
                             );
                         }
                     }
@@ -774,10 +787,10 @@ namespace AprilTag
                     var tagSize = m_tagSizes.TryGetValue(tagId, out var size) ? size : 0.165f;
                     CreateOrUpdateKeepOutZone(tagId, anchor.transform.position, tagSize);
 
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Successfully created anchor for tag {tagId} at {anchor.transform.position}. "
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Successfully created anchor for tag {tagId} at {anchor.transform.position}. "
                                 + $"State: IsPlaced={state.IsPlaced}, Total anchors: {m_anchorsById.Count}, "
                                 + $"Keep-out zones: {m_keepOutZones.Count}"
                         );
@@ -788,10 +801,10 @@ namespace AprilTag
                 }
                 else
                 {
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.Log(
-                            "[AprilTagSpatialAnchorManager] Anchor created but not associated with AprilTag detection"
+                            "[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor created but not associated with AprilTag detection"
                         );
                     }
                 }
@@ -806,10 +819,10 @@ namespace AprilTag
                     // Remove the temporary keep-out zone
                     RemoveKeepOutZone(tagId);
 
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.LogError(
-                            $"[AprilTagSpatialAnchorManager] Failed to create anchor for tag {tagId}: {result}"
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Failed to create anchor for tag {tagId}: {result}"
                         );
                     }
                 }
@@ -821,10 +834,10 @@ namespace AprilTag
         /// </summary>
         private void OnBuildingBlockAnchorsLoaded(List<OVRSpatialAnchor> loadedAnchors)
         {
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] {loadedAnchors.Count} anchors loaded from storage"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] {loadedAnchors.Count} anchors loaded from storage"
                 );
 
                 // Log all anchor names and UUIDs to help with debugging
@@ -833,7 +846,7 @@ namespace AprilTag
                     if (anchor != null && anchor.gameObject != null)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Loaded anchor: '{anchor.gameObject.name}' "
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Loaded anchor: '{anchor.gameObject.name}' "
                                 + $"at {anchor.transform.position}, UUID: {anchor.Uuid}"
                         );
                     }
@@ -854,18 +867,18 @@ namespace AprilTag
                 {
                     tagId = LoadTagIdFromUuid(anchor.Uuid);
 
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         if (tagId >= 0)
                         {
                             Debug.Log(
-                                $"[AprilTagSpatialAnchorManager] Restored tag ID {tagId} from UUID mapping for anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid})"
+                                $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Restored tag ID {tagId} from UUID mapping for anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid})"
                             );
                         }
                         else
                         {
                             Debug.LogWarning(
-                                $"[AprilTagSpatialAnchorManager] No tag ID mapping found for UUID: {anchor.Uuid}"
+                                $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] No tag ID mapping found for UUID: {anchor.Uuid}"
                             );
                         }
                     }
@@ -876,10 +889,10 @@ namespace AprilTag
                     // Check if anchor already exists for this tag (prevent duplicates)
                     if (m_anchorsById.ContainsKey(tagId))
                     {
-                        if (EnableDebugLogging)
+                        if (m_enableDebugLogging)
                         {
                             Debug.LogWarning(
-                                $"[AprilTagSpatialAnchorManager] Duplicate anchor detected for tag {tagId}, keeping first one"
+                                $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Duplicate anchor detected for tag {tagId}, keeping first one"
                             );
                         }
                         continue;
@@ -906,10 +919,10 @@ namespace AprilTag
                     var tagSize = m_tagSizes.TryGetValue(tagId, out var size) ? size : 0.165f;
                     CreateOrUpdateKeepOutZone(tagId, anchor.transform.position, tagSize);
 
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Restored association for tag {tagId} from loaded anchor '{anchor.gameObject.name}' at position {anchor.transform.position}"
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Restored association for tag {tagId} from loaded anchor '{anchor.gameObject.name}' at position {anchor.transform.position}"
                         );
                     }
 
@@ -918,20 +931,20 @@ namespace AprilTag
                 }
                 else
                 {
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.LogWarning(
-                            $"[AprilTagSpatialAnchorManager] Could not extract tag ID from loaded anchor name: '{anchor.gameObject.name}'. "
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Could not extract tag ID from loaded anchor name: '{anchor.gameObject.name}'. "
                                 + $"Only anchors with names like 'AprilTagAnchor_Tag12' will be recognized."
                         );
                     }
                 }
             }
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Anchor loading complete: {m_anchorsById.Count} AprilTag anchors restored, "
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor loading complete: {m_anchorsById.Count} AprilTag anchors restored, "
                         + $"{loadedAnchors.Count - m_anchorsById.Count} other anchors ignored"
                 );
             }
@@ -950,9 +963,11 @@ namespace AprilTag
                 m_placementStates.Clear();
                 m_keepOutZones.Clear();
 
-                if (EnableDebugLogging)
+                if (m_enableDebugLogging)
                 {
-                    Debug.Log("[AprilTagSpatialAnchorManager] All anchors erased successfully");
+                    Debug.Log(
+                        "[AprilTagSpatialAnchorManagerSpatialAnchorManager] All anchors erased successfully"
+                    );
                 }
 
                 // Fire event
@@ -977,10 +992,10 @@ namespace AprilTag
                     m_anchorGuidToTagId.Remove(anchor.Uuid);
                     RemoveKeepOutZone(tagId);
 
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Anchor for tag {tagId} erased successfully"
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor for tag {tagId} erased successfully"
                         );
                     }
 
@@ -1097,10 +1112,10 @@ namespace AprilTag
             {
                 m_keepOutZones.Remove(tagId);
 
-                if (EnableDebugLogging)
+                if (m_enableDebugLogging)
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Removed expired keep-out zone for tag {tagId}"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Removed expired keep-out zone for tag {tagId}"
                     );
                 }
             }
@@ -1132,10 +1147,10 @@ namespace AprilTag
                 {
                     m_placementStates.Remove(tagId);
 
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Cleaned up stale placement state for tag {tagId}"
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Cleaned up stale placement state for tag {tagId}"
                         );
                     }
                 }
@@ -1215,10 +1230,10 @@ namespace AprilTag
             // Save UUID mapping to PlayerPrefs
             SaveUuidToTagIdMapping(anchor.Uuid, tagId);
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Updated anchor mapping for tag {tagId} at position {anchor.transform.position}"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Updated anchor mapping for tag {tagId} at position {anchor.transform.position}"
                 );
             }
         }
@@ -1230,7 +1245,9 @@ namespace AprilTag
         {
             if (anchor == null)
             {
-                Debug.LogWarning("[AprilTagSpatialAnchorManager] Cannot erase null anchor");
+                Debug.LogWarning(
+                    "[AprilTagSpatialAnchorManagerSpatialAnchorManager] Cannot erase null anchor"
+                );
                 return;
             }
 
@@ -1244,10 +1261,10 @@ namespace AprilTag
         {
             var tagId = GetTagIdForAnchor(anchor);
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Erasing anchor for tag {tagId} (UUID: {anchor.Uuid})"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Erasing anchor for tag {tagId} (UUID: {anchor.Uuid})"
                 );
             }
 
@@ -1282,10 +1299,10 @@ namespace AprilTag
                     PlayerPrefs.Save();
                 }
 
-                if (EnableDebugLogging)
+                if (m_enableDebugLogging)
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Successfully erased anchor for tag {tagId}"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Successfully erased anchor for tag {tagId}"
                     );
                 }
 
@@ -1301,7 +1318,7 @@ namespace AprilTag
             else
             {
                 Debug.LogError(
-                    $"[AprilTagSpatialAnchorManager] Failed to erase anchor for tag {tagId}: {eraseResult.Status}"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Failed to erase anchor for tag {tagId}: {eraseResult.Status}"
                 );
             }
         }
@@ -1311,10 +1328,10 @@ namespace AprilTag
         /// </summary>
         public void EraseAllAnchors()
         {
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Erasing all {m_anchorsById.Count} AprilTag anchors"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Erasing all {m_anchorsById.Count} AprilTag anchors"
                 );
             }
 
@@ -1341,17 +1358,17 @@ namespace AprilTag
                 }
                 PlayerPrefs.Save();
 
-                if (EnableDebugLogging)
+                if (m_enableDebugLogging)
                 {
                     Debug.Log(
-                        "[AprilTagSpatialAnchorManager] All anchors erased and tracking cleared"
+                        "[AprilTagSpatialAnchorManagerSpatialAnchorManager] All anchors erased and tracking cleared"
                     );
                 }
             }
             else
             {
                 Debug.LogError(
-                    "[AprilTagSpatialAnchorManager] Cannot erase anchors - SpatialAnchorCoreBuildingBlock not available"
+                    "[AprilTagSpatialAnchorManagerSpatialAnchorManager] Cannot erase anchors - SpatialAnchorCoreBuildingBlock not available"
                 );
             }
         }
@@ -1431,10 +1448,10 @@ namespace AprilTag
 
             PlayerPrefs.Save();
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Saved UUID mapping: {uuid} -> Tag {tagId}"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Saved UUID mapping: {uuid} -> Tag {tagId}"
                 );
             }
         }
@@ -1448,19 +1465,19 @@ namespace AprilTag
             if (PlayerPrefs.HasKey(key))
             {
                 var tagId = PlayerPrefs.GetInt(key);
-                if (EnableDebugLogging)
+                if (m_enableDebugLogging)
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Found PlayerPrefs mapping: {uuid} -> Tag {tagId}"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Found PlayerPrefs mapping: {uuid} -> Tag {tagId}"
                     );
                 }
                 return tagId;
             }
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.LogWarning(
-                    $"[AprilTagSpatialAnchorManager] PlayerPrefs key not found: {key}"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] PlayerPrefs key not found: {key}"
                 );
             }
             return -1;
@@ -1487,10 +1504,10 @@ namespace AprilTag
                     {
                         uuidsToLoad.Add(uuid);
 
-                        if (EnableDebugLogging)
+                        if (m_enableDebugLogging)
                         {
                             Debug.Log(
-                                $"[AprilTagSpatialAnchorManager] Found saved UUID for Tag {tagId}: {uuid}"
+                                $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Found saved UUID for Tag {tagId}: {uuid}"
                             );
                         }
                     }
@@ -1499,19 +1516,19 @@ namespace AprilTag
 
             if (uuidsToLoad.Count == 0)
             {
-                if (EnableDebugLogging)
+                if (m_enableDebugLogging)
                 {
                     Debug.Log(
-                        "[AprilTagSpatialAnchorManager] No anchors found in PlayerPrefs to load"
+                        "[AprilTagSpatialAnchorManagerSpatialAnchorManager] No anchors found in PlayerPrefs to load"
                     );
                 }
                 yield break;
             }
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Loading {uuidsToLoad.Count} anchors from PlayerPrefs UUIDs..."
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Loading {uuidsToLoad.Count} anchors from PlayerPrefs UUIDs..."
                 );
             }
 
@@ -1529,10 +1546,10 @@ namespace AprilTag
                 {
                     if (unboundAnchors == null || unboundAnchors.Length == 0)
                     {
-                        if (EnableDebugLogging)
+                        if (m_enableDebugLogging)
                         {
                             Debug.LogWarning(
-                                $"[AprilTagSpatialAnchorManager] No anchors were loaded from storage (requested {uuidsToLoad.Count} UUIDs)"
+                                $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] No anchors were loaded from storage (requested {uuidsToLoad.Count} UUIDs)"
                             );
                         }
                         lock (lockObj)
@@ -1542,10 +1559,10 @@ namespace AprilTag
                         return;
                     }
 
-                    if (EnableDebugLogging)
+                    if (m_enableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagSpatialAnchorManager] Loaded {unboundAnchors.Length} unbound anchors (requested {uuidsToLoad.Count}), localizing..."
+                            $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Loaded {unboundAnchors.Length} unbound anchors (requested {uuidsToLoad.Count}), localizing..."
                         );
                     }
 
@@ -1614,19 +1631,19 @@ namespace AprilTag
                                                         Quaternion.identity;
                                                 }
 
-                                                if (EnableDebugLogging)
+                                                if (m_enableDebugLogging)
                                                 {
                                                     Debug.Log(
-                                                        $"[AprilTagSpatialAnchorManager] Instantiated visualization for loaded Tag {tagId} anchor"
+                                                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Instantiated visualization for loaded Tag {tagId} anchor"
                                                     );
                                                 }
                                             }
                                         }
 
-                                        if (EnableDebugLogging)
+                                        if (m_enableDebugLogging)
                                         {
                                             Debug.Log(
-                                                $"[AprilTagSpatialAnchorManager] Successfully loaded and bound Tag {tagId} anchor at {spatialAnchor.transform.position}"
+                                                $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Successfully loaded and bound Tag {tagId} anchor at {spatialAnchor.transform.position}"
                                             );
                                         }
                                     }
@@ -1634,7 +1651,7 @@ namespace AprilTag
                                 else
                                 {
                                     Debug.LogWarning(
-                                        $"[AprilTagSpatialAnchorManager] Failed to localize anchor with UUID {anchorUuid}"
+                                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Failed to localize anchor with UUID {anchorUuid}"
                                     );
                                 }
 
@@ -1678,10 +1695,10 @@ namespace AprilTag
                 yield return null; // Wait one frame
             }
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Finished loading anchors from PlayerPrefs. Total loaded: {m_anchorsById.Count}"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Finished loading anchors from PlayerPrefs. Total loaded: {m_anchorsById.Count}"
                 );
             }
         }
@@ -1696,10 +1713,10 @@ namespace AprilTag
 
             m_anchorSaveQueue.Enqueue(anchor);
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Queued anchor '{anchor.gameObject.name}' for saving (queue size: {m_anchorSaveQueue.Count})"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Queued anchor '{anchor.gameObject.name}' for saving (queue size: {m_anchorSaveQueue.Count})"
                 );
             }
 
@@ -1750,10 +1767,10 @@ namespace AprilTag
             // CRITICAL: Give Meta's SDK time to flush the last anchor to persistent storage
             // Even after SaveAnchorAsync reports success, the SDK needs time to commit
             // This is especially important for the last anchor in a batch
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] All anchors saved, waiting for Meta SDK to flush to disk..."
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] All anchors saved, waiting for Meta SDK to flush to disk..."
                 );
             }
 
@@ -1761,10 +1778,10 @@ namespace AprilTag
 
             m_isSavingAnchor = false;
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Finished processing anchor save queue (processed until empty)"
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Finished processing anchor save queue (processed until empty)"
                 );
             }
         }
@@ -1776,14 +1793,16 @@ namespace AprilTag
         {
             if (anchor == null)
             {
-                Debug.LogError("[AprilTagSpatialAnchorManager] Cannot save null anchor");
+                Debug.LogError(
+                    "[AprilTagSpatialAnchorManagerSpatialAnchorManager] Cannot save null anchor"
+                );
                 yield break;
             }
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Saving anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) to local storage..."
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Saving anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) to local storage..."
                 );
             }
 
@@ -1802,11 +1821,11 @@ namespace AprilTag
                 // Log progress for slow localization
                 if (
                     Mathf.FloorToInt(waitedTime) > Mathf.FloorToInt(waitedTime - checkInterval)
-                    && EnableDebugLogging
+                    && m_enableDebugLogging
                 )
                 {
                     Debug.Log(
-                        $"[AprilTagSpatialAnchorManager] Waiting for anchor '{anchor.gameObject.name}' localization... ({waitedTime:F1}s, created={anchor.Created}, localized={anchor.Localized})"
+                        $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Waiting for anchor '{anchor.gameObject.name}' localization... ({waitedTime:F1}s, created={anchor.Created}, localized={anchor.Localized})"
                     );
                 }
             }
@@ -1814,7 +1833,7 @@ namespace AprilTag
             if (!anchor.Created)
             {
                 Debug.LogError(
-                    $"[AprilTagSpatialAnchorManager] Anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) was not created after waiting {waitedTime:F1}s. Cannot save."
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) was not created after waiting {waitedTime:F1}s. Cannot save."
                 );
                 yield break;
             }
@@ -1822,16 +1841,16 @@ namespace AprilTag
             if (!anchor.Localized)
             {
                 Debug.LogError(
-                    $"[AprilTagSpatialAnchorManager] Anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) created but NOT LOCALIZED after {waitedTime:F1}s. "
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}) created but NOT LOCALIZED after {waitedTime:F1}s. "
                         + $"Skipping save - unlocalized anchors will not persist across sessions."
                 );
                 yield break;
             }
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Anchor '{anchor.gameObject.name}' fully ready (created={anchor.Created}, localized={anchor.Localized}) after {waitedTime:F1}s, proceeding to save..."
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Anchor '{anchor.gameObject.name}' fully ready (created={anchor.Created}, localized={anchor.Localized}) after {waitedTime:F1}s, proceeding to save..."
                 );
             }
 
@@ -1847,11 +1866,11 @@ namespace AprilTag
             // Get result from OVRTask
             var saveResult = saveTask.GetResult();
 
-            if (EnableDebugLogging)
+            if (m_enableDebugLogging)
             {
                 // Always log the full result for debugging
                 Debug.Log(
-                    $"[AprilTagSpatialAnchorManager] Save result for anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}): "
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Save result for anchor '{anchor.gameObject.name}' (UUID: {anchor.Uuid}): "
                         + $"Success={saveResult.Success}, Status={saveResult.Status}"
                 );
             }
@@ -1859,7 +1878,7 @@ namespace AprilTag
             if (!saveResult.Success)
             {
                 Debug.LogError(
-                    $"[AprilTagSpatialAnchorManager] Failed to save anchor '{anchor.gameObject.name}' to local storage. "
+                    $"[AprilTagSpatialAnchorManagerSpatialAnchorManager] Failed to save anchor '{anchor.gameObject.name}' to local storage. "
                         + $"Success: {saveResult.Success}, Status: {saveResult.Status}"
                 );
             }

@@ -27,8 +27,14 @@ public class AprilTagWebcamPipeline : MonoBehaviour
     [SerializeField]
     private bool m_useCenterEyeTransform = true;
 
+    [Header("Debug Logging")]
+    [Tooltip("Enable debug logging for webcam pipeline operations")]
     [SerializeField]
-    private bool m_enableAllDebugLogging = false;
+    private bool m_enableDebugLogging = false;
+
+    [Tooltip("Frame interval for debug logs (higher = less frequent)")]
+    [SerializeField]
+    private int m_logInterval = 300;
 
     // Detector state (only used if this component owns the detector)
     private TagDetector m_detector;
@@ -131,9 +137,9 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                 var centerEyeAnchor = cameraRig.centerEyeAnchor;
                 if (centerEyeAnchor != null)
                 {
-                    if (m_enableAllDebugLogging)
+                    if (m_enableDebugLogging)
                         Debug.Log(
-                            $"[AprilTag] Using OVRCameraRig center eye anchor for Quest positioning"
+                            $"[AprilTagWebcamPipeline] Using OVRCameraRig center eye anchor for Quest positioning"
                         );
                     return centerEyeAnchor;
                 }
@@ -143,8 +149,8 @@ public class AprilTagWebcamPipeline : MonoBehaviour
             var xrOrigin = FindFirstObjectByType<XROrigin>();
             if (xrOrigin != null && xrOrigin.Camera != null)
             {
-                if (m_enableAllDebugLogging)
-                    Debug.Log($"[AprilTag] Using XR Origin camera for Quest positioning");
+                if (m_enableDebugLogging)
+                    Debug.Log($"[AprilTagWebcamPipeline] Using XR Origin camera for Quest positioning");
                 return xrOrigin.Camera.transform;
             }
         }
@@ -168,9 +174,9 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                 || cam.name.ToLower().Contains("main")
             )
             {
-                if (m_enableAllDebugLogging)
+                if (m_enableDebugLogging)
                     Debug.Log(
-                        $"[AprilTag] Using camera '{cam.name}' as reference for tag positioning"
+                        $"[AprilTagWebcamPipeline] Using camera '{cam.name}' as reference for tag positioning"
                     );
                 return cam.transform;
             }
@@ -189,9 +195,9 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                 var cam = cameraField.GetValue(m_webCamManager) as Camera;
                 if (cam != null)
                 {
-                    if (m_enableAllDebugLogging)
+                    if (m_enableDebugLogging)
                         Debug.Log(
-                            $"[AprilTag] Using WebCam manager camera '{cam.name}' as reference for tag positioning"
+                            $"[AprilTagWebcamPipeline] Using WebCam manager camera '{cam.name}' as reference for tag positioning"
                         );
                     return cam.transform;
                 }
@@ -200,9 +206,9 @@ public class AprilTagWebcamPipeline : MonoBehaviour
 
         // Fallback to Camera.main or this transform
         var fallbackCam = Camera.main ? Camera.main.transform : transform;
-        if (m_enableAllDebugLogging)
+        if (m_enableDebugLogging)
             Debug.Log(
-                $"[AprilTag] Using fallback camera '{fallbackCam.name}' as reference for tag positioning"
+                $"[AprilTagWebcamPipeline] Using fallback camera '{fallbackCam.name}' as reference for tag positioning"
             );
         return fallbackCam;
     }
@@ -216,9 +222,9 @@ public class AprilTagWebcamPipeline : MonoBehaviour
         m_detH = height;
         m_detDecim = Mathf.Max(1, dec);
 
-        if (m_enableAllDebugLogging)
+        if (m_enableDebugLogging)
             Debug.Log(
-                $"[AprilTag] Created detector: {width}x{height}, family={m_tagFamily}, decimate={Mathf.Max(1, dec)}"
+                $"[AprilTagWebcamPipeline] Created detector: {width}x{height}, family={m_tagFamily}, decimate={Mathf.Max(1, dec)}"
             );
     }
 
@@ -285,7 +291,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                     catch (Exception e)
                     {
                         Debug.LogWarning(
-                            $"[AprilTag] Error accessing property {prop.Name}: {e.Message}"
+                            $"[AprilTagWebcamPipeline] Error accessing property {prop.Name}: {e.Message}"
                         );
                     }
                 }
@@ -317,7 +323,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                     catch (Exception e)
                     {
                         Debug.LogWarning(
-                            $"[AprilTag] Error accessing field {field.Name}: {e.Message}"
+                            $"[AprilTagWebcamPipeline] Error accessing field {field.Name}: {e.Message}"
                         );
                     }
                 }
@@ -325,9 +331,9 @@ public class AprilTagWebcamPipeline : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (m_enableAllDebugLogging)
+            if (m_enableDebugLogging)
             {
-                Debug.LogWarning($"[AprilTag] Error accessing raw detections: {e.Message}");
+                Debug.LogWarning($"[AprilTagWebcamPipeline] Error accessing raw detections: {e.Message}");
             }
         }
 
@@ -381,7 +387,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                     catch (Exception e)
                     {
                         Debug.LogWarning(
-                            $"[AprilTag] Error accessing property {prop.Name}: {e.Message}"
+                            $"[AprilTagWebcamPipeline] Error accessing property {prop.Name}: {e.Message}"
                         );
                     }
                 }
@@ -414,24 +420,24 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                     catch (Exception e)
                     {
                         Debug.LogWarning(
-                            $"[AprilTag] Error accessing field {field.Name}: {e.Message}"
+                            $"[AprilTagWebcamPipeline] Error accessing field {field.Name}: {e.Message}"
                         );
                     }
                 }
             }
 
-            if (m_enableAllDebugLogging)
+            if (m_enableDebugLogging)
             {
                 Debug.LogWarning(
-                    "[AprilTag] No raw detection data found - corner detection will not work"
+                    "[AprilTagWebcamPipeline] No raw detection data found - corner detection will not work"
                 );
             }
         }
         catch (Exception e)
         {
-            if (m_enableAllDebugLogging)
+            if (m_enableDebugLogging)
             {
-                Debug.LogWarning($"[AprilTag] Error accessing raw detections: {e.Message}");
+                Debug.LogWarning($"[AprilTagWebcamPipeline] Error accessing raw detections: {e.Message}");
             }
         }
 

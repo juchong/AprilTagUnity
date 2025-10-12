@@ -67,7 +67,7 @@ public class AprilTagController : MonoBehaviour
         "Offset for corner-based positioning (primary method). Saves to PlayerPrefs. Adjustable at runtime with Quest controllers when configuration tool enabled."
     )]
     [SerializeField]
-    private Vector3 m_cornerPositionOffset = new(0.030f, 0.010f, 0.000f);
+    private Vector3 m_cornerPositionOffset = new(0.000f, 0.000f, 0.000f);
 
     [Tooltip("Save runtime offset to PlayerPrefs for persistence")]
     [SerializeField]
@@ -139,7 +139,7 @@ public class AprilTagController : MonoBehaviour
 
     [Tooltip("Max detection updates per second.")]
     [SerializeField]
-    private float m_maxDetectionsPerSecond = 30f; // Increased from 15 to 30 for better tracking
+    private float m_maxDetectionsPerSecond = 15f;
 
     [Header("Async Detection")]
     [Tooltip("Run detection on background thread to prevent main thread blocking")]
@@ -162,7 +162,17 @@ public class AprilTagController : MonoBehaviour
     [Header("Diagnostics")]
     [Tooltip("Enable all debug logging (can be toggled at runtime)")]
     [SerializeField]
-    private bool m_enableAllDebugLogging = true;
+    private bool m_enableAllDebugLogging = false;
+
+    [Tooltip(
+        "Frame interval for debug logs (higher = less frequent, e.g., 60 = ~1 second at 60 FPS)"
+    )]
+    [SerializeField]
+    private int m_logInterval = 60;
+
+    [Tooltip("Frame interval for verbose debug logs (e.g., 300 = ~4 seconds at 72 FPS)")]
+    [SerializeField]
+    private int m_verboseLogInterval = 300;
 
     [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
     [SerializeField]
@@ -253,19 +263,6 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Path to the histogram compute shader (relative to Resources folder)")]
     [SerializeField]
     private string m_histogramShaderPath = "AprilTagHistogram";
-
-    [Header("Debug Logging Intervals")]
-    [Tooltip("Frame interval for periodic debug logs (e.g., 60 = every second at 60fps)")]
-    [SerializeField]
-    private int m_debugLogInterval = 60;
-
-    [Tooltip("Frame interval for verbose debug logs (e.g., 300 = every 5 seconds at 60fps)")]
-    [SerializeField]
-    private int m_verboseDebugLogInterval = 300;
-
-    [Tooltip("Frame interval for corner quality logs (e.g., 180 = every 3 seconds at 60fps)")]
-    [SerializeField]
-    private int m_cornerQualityLogInterval = 180;
 
     [Header("PhotonVision-Inspired Filtering")]
     // Note: These temporal filters work on detection results and complement GPU preprocessing
@@ -533,7 +530,7 @@ public class AprilTagController : MonoBehaviour
             if (m_environmentRaycastManager == null && m_enableAllDebugLogging)
             {
                 Debug.LogWarning(
-                    "[AprilTag] No EnvironmentRaycastManager found. Passthrough raycasting will not work properly. Please assign one or disable usePassthroughRaycasting."
+                    "[AprilTagController] No EnvironmentRaycastManager found. Passthrough raycasting will not work properly. Please assign one or disable usePassthroughRaycasting."
                 );
             }
         }
@@ -1377,20 +1374,20 @@ public class AprilTagController : MonoBehaviour
 
         // MEMORY LEAK FIX: Periodically clean up old visualizations that haven't been seen
         // This prevents m_vizById from growing indefinitely as different tags are detected over time
-        if (Time.frameCount % 900 == 0) // Every ~12 seconds at 72 FPS
+        if (Time.frameCount % (m_verboseLogInterval * 3) == 0) // Every ~12 seconds at 72 FPS (900 frames)
         {
             CleanupOldVisualizations(m_seenTagsBuffer);
         }
 
         // PERFORMANCE: Force periodic garbage collection to prevent buildup
         // Quest has limited RAM and progressive degradation suggests memory pressure
-        if (Time.frameCount % 3600 == 0) // Every ~50 seconds at 72 FPS
+        if (Time.frameCount % (m_verboseLogInterval * 12) == 0) // Every ~50 seconds at 72 FPS (3600 frames)
         {
             System.GC.Collect();
             if (m_enableAllDebugLogging)
             {
                 float memory = System.GC.GetTotalMemory(false) / 1024f / 1024f;
-                Debug.Log($"[AprilTag] Forced GC cleanup. Memory: {memory:F1}MB");
+                Debug.Log($"[AprilTagController] Forced GC cleanup. Memory: {memory:F1}MB");
             }
         }
     }

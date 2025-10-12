@@ -142,7 +142,7 @@ namespace AprilTag
                 case FieldLayoutType.Reefscape2025_Welded:
                     return FieldLayout_2025_Reefscape_Welded.JSON;
                 default:
-                    Debug.LogError($"[FRCFieldLocalizer] Unknown field layout type: {fieldType}");
+                    Debug.LogError($"[FieldLocalizer] Unknown field layout type: {fieldType}");
                     return null;
             }
         }
@@ -177,7 +177,7 @@ namespace AprilTag
             if (m_aprilTagController == null)
             {
                 Debug.LogWarning(
-                    "[FRCFieldLocalizer] AprilTagController is null, using default tag size 0.165m"
+                    "[FieldLocalizer] AprilTagController is null, using default tag size 0.165m"
                 );
                 return 0.165f;
             }
@@ -191,7 +191,7 @@ namespace AprilTag
             if (field == null)
             {
                 Debug.LogWarning(
-                    "[FRCFieldLocalizer] Could not find m_tagSizeMeters field, using default 0.165m"
+                    "[FieldLocalizer] Could not find m_tagSizeMeters field, using default 0.165m"
                 );
                 return 0.165f;
             }
@@ -200,7 +200,7 @@ namespace AprilTag
 
             if (m_enableDebug)
             {
-                Debug.Log($"[FRCFieldLocalizer] Using tag size {tagSize}m from AprilTagController");
+                Debug.Log($"[FieldLocalizer] Using tag size {tagSize}m from AprilTagController");
             }
 
             return tagSize;
@@ -215,7 +215,7 @@ namespace AprilTag
             if (m_aprilTagController == null)
             {
                 Debug.LogError(
-                    "[FRCFieldLocalizer] AprilTagController not found - cannot determine tag size"
+                    "[FieldLocalizer] AprilTagController not found - cannot determine tag size"
                 );
                 enabled = false;
                 return;
@@ -232,7 +232,7 @@ namespace AprilTag
             if (fieldJson == null)
             {
                 Debug.LogError(
-                    $"[FRCFieldLocalizer] Failed to get JSON for field layout '{m_selectedFieldLayout}'"
+                    $"[FieldLocalizer] Failed to get JSON for field layout '{m_selectedFieldLayout}'"
                 );
                 enabled = false;
                 return;
@@ -245,7 +245,7 @@ namespace AprilTag
             if (m_fieldLayout == null)
             {
                 Debug.LogError(
-                    $"[FRCFieldLocalizer] Failed to parse field layout '{m_selectedFieldLayout}'"
+                    $"[FieldLocalizer] Failed to parse field layout '{m_selectedFieldLayout}'"
                 );
                 enabled = false;
                 return;
@@ -254,7 +254,7 @@ namespace AprilTag
             if (m_enableDebug)
             {
                 Debug.Log(
-                    $"[FRCFieldLocalizer] Using field layout '{fieldName}' with {m_fieldLayout.tags?.Count ?? 0} tags"
+                    $"[FieldLocalizer] Using field layout '{fieldName}' with {m_fieldLayout.tags?.Count ?? 0} tags"
                 );
             }
 
@@ -282,7 +282,7 @@ namespace AprilTag
             if (m_anchorManager == null)
             {
                 if (m_enableDebug && Time.frameCount % m_debugLogInterval == 0)
-                    Debug.LogWarning("[FRCFieldLocalizer] No anchor manager - cannot align");
+                    Debug.LogWarning("[FieldLocalizer] No anchor manager - cannot align");
                 return;
             }
 
@@ -300,7 +300,7 @@ namespace AprilTag
                     // Try to improve alignment with more anchors
                     if (m_enableDebug && Time.frameCount % m_debugLogInterval == 0)
                         Debug.Log(
-                            $"[FRCFieldLocalizer] Attempting to improve alignment with {currentAnchorCount} anchors (had {m_lastSuccessfulAnchorCount})"
+                            $"[FieldLocalizer] Attempting to improve alignment with {currentAnchorCount} anchors (had {m_lastSuccessfulAnchorCount})"
                         );
                     CalculateAlignment();
                 }
@@ -354,7 +354,7 @@ namespace AprilTag
         private void OnAnchorCreated(int tagId, OVRSpatialAnchor anchor)
         {
             if (m_enableDebug)
-                Debug.Log($"[FRCFieldLocalizer] New anchor for tag {tagId}");
+                Debug.Log($"[FieldLocalizer] New anchor for tag {tagId}");
 
             // Recalculate alignment with new anchor
             if (m_autoAlign)
@@ -392,7 +392,7 @@ namespace AprilTag
                 )
                 {
                     Debug.LogWarning(
-                        $"[FRCFieldLocalizer] Tag {tagId} anchor has invalid position - skipping"
+                        $"[FieldLocalizer] Tag {tagId} anchor has invalid position - skipping"
                     );
                     continue;
                 }
@@ -403,9 +403,7 @@ namespace AprilTag
             if (pairs.Count < m_minAnchors)
             {
                 if (m_enableDebug && Time.frameCount % 60 == 0)
-                    Debug.Log(
-                        $"[FRCFieldLocalizer] Need {m_minAnchors} anchors, have {pairs.Count}"
-                    );
+                    Debug.Log($"[FieldLocalizer] Need {m_minAnchors} anchors, have {pairs.Count}");
                 return;
             }
 
@@ -418,7 +416,7 @@ namespace AprilTag
                 {
                     if (Time.frameCount % m_debugLogInterval == 0)
                         Debug.LogWarning(
-                            $"[FRCFieldLocalizer] Outlier rejection left only {filteredPairs.Count} anchors - using all {pairs.Count} anchors"
+                            $"[FieldLocalizer] Outlier rejection left only {filteredPairs.Count} anchors - using all {pairs.Count} anchors"
                         );
                     filteredPairs = pairs;
                 }
@@ -429,7 +427,7 @@ namespace AprilTag
                 )
                 {
                     Debug.Log(
-                        $"[FRCFieldLocalizer] Rejected {pairs.Count - filteredPairs.Count} outliers, using {filteredPairs.Count} anchors"
+                        $"[FieldLocalizer] Rejected {pairs.Count - filteredPairs.Count} outliers, using {filteredPairs.Count} anchors"
                     );
                 }
             }
@@ -441,7 +439,7 @@ namespace AprilTag
             if (!result.HasValue)
             {
                 if (Time.frameCount % m_debugLogInterval == 0)
-                    Debug.LogWarning("[FRCFieldLocalizer] Transform calculation failed");
+                    Debug.LogWarning("[FieldLocalizer] Transform calculation failed");
                 return;
             }
 
@@ -454,7 +452,7 @@ namespace AprilTag
             {
                 if (Time.frameCount % m_debugLogInterval == 0)
                     Debug.LogWarning(
-                        $"[FRCFieldLocalizer] Alignment error {error:F3}m exceeds threshold {m_maxAlignmentError:F3}m - rejecting"
+                        $"[FieldLocalizer] Alignment error {error:F3}m exceeds threshold {m_maxAlignmentError:F3}m - rejecting"
                     );
                 return;
             }
@@ -468,7 +466,7 @@ namespace AprilTag
             {
                 if (m_enableDebug)
                     Debug.Log(
-                        $"[FRCFieldLocalizer] New alignment error {error:F3}m worse than current {m_currentAlignmentError:F3}m - keeping existing alignment"
+                        $"[FieldLocalizer] New alignment error {error:F3}m worse than current {m_currentAlignmentError:F3}m - keeping existing alignment"
                     );
                 return;
             }
@@ -484,10 +482,10 @@ namespace AprilTag
             {
                 // Log alignment details including anchor positions to verify field registration
                 Debug.Log(
-                    $"[FRCFieldLocalizer] ✓ Aligned using {filteredPairs.Count} anchors with error {error:F3}m"
+                    $"[FieldLocalizer] ✓ Aligned using {filteredPairs.Count} anchors with error {error:F3}m"
                 );
                 Debug.Log(
-                    $"[FRCFieldLocalizer] Field origin set to: position={translation:F3}, rotation={rotation.eulerAngles:F1}"
+                    $"[FieldLocalizer] Field origin set to: position={translation:F3}, rotation={rotation.eulerAngles:F1}"
                 );
 
                 // Log sample anchor transformations to verify alignment
@@ -496,7 +494,7 @@ namespace AprilTag
                     var samplePair = filteredPairs[0];
                     var transformedPos = rotation * samplePair.fieldPos + translation;
                     Debug.Log(
-                        $"[FRCFieldLocalizer] Sample anchor {samplePair.tagId}: Quest={samplePair.questPos:F3}, Field={samplePair.fieldPos:F3}, Transformed={transformedPos:F3}, Error={Vector3.Distance(samplePair.questPos, transformedPos):F3}m"
+                        $"[FieldLocalizer] Sample anchor {samplePair.tagId}: Quest={samplePair.questPos:F3}, Field={samplePair.fieldPos:F3}, Transformed={transformedPos:F3}, Error={Vector3.Distance(samplePair.questPos, transformedPos):F3}m"
                     );
                 }
             }
@@ -617,7 +615,7 @@ namespace AprilTag
                         );
 
                     Debug.Log(
-                        $"[FRCFieldLocalizer] Rejecting tag {pairs[index].tagId} as outlier: {string.Join(", ", reasons)}"
+                        $"[FieldLocalizer] Rejecting tag {pairs[index].tagId} as outlier: {string.Join(", ", reasons)}"
                     );
                 }
             }
@@ -693,7 +691,7 @@ namespace AprilTag
             // Validate centroids
             if (float.IsNaN(questCenter.x) || float.IsNaN(fieldCenter.x))
             {
-                Debug.LogError("[FRCFieldLocalizer] Invalid centroid calculation");
+                Debug.LogError("[FieldLocalizer] Invalid centroid calculation");
                 return null;
             }
 
@@ -737,7 +735,7 @@ namespace AprilTag
             if (totalWeight_rotation == 0f)
             {
                 Debug.LogWarning(
-                    "[FRCFieldLocalizer] Could not calculate rotation - anchors too close together"
+                    "[FieldLocalizer] Could not calculate rotation - anchors too close together"
                 );
                 return null;
             }
@@ -756,7 +754,7 @@ namespace AprilTag
                 || float.IsNaN(translation.z)
             )
             {
-                Debug.LogError("[FRCFieldLocalizer] Invalid translation calculation");
+                Debug.LogError("[FieldLocalizer] Invalid translation calculation");
                 return null;
             }
 
@@ -767,7 +765,7 @@ namespace AprilTag
             if (m_enableDebug)
             {
                 Debug.Log(
-                    $"[FRCFieldLocalizer] Transform calculated from {pairs.Count} anchors, "
+                    $"[FieldLocalizer] Transform calculated from {pairs.Count} anchors, "
                         + $"{(pairs.Count * (pairs.Count - 1)) / 2} pairwise comparisons, "
                         + $"rotation: {rotation.eulerAngles.y:F1}°"
                 );
@@ -840,7 +838,7 @@ namespace AprilTag
             }
 
             if (m_enableDebug)
-                Debug.Log("[FRCFieldLocalizer] Alignment reset");
+                Debug.Log("[FieldLocalizer] Alignment reset");
         }
 
         private void SaveAlignment()
@@ -866,7 +864,7 @@ namespace AprilTag
             {
                 if (m_enableDebug)
                     Debug.LogWarning(
-                        $"[FRCFieldLocalizer] Saved alignment for '{savedField}' doesn't match current field '{currentFieldName}' - ignoring"
+                        $"[FieldLocalizer] Saved alignment for '{savedField}' doesn't match current field '{currentFieldName}' - ignoring"
                     );
                 return;
             }
@@ -883,7 +881,7 @@ namespace AprilTag
             m_isAligned = true;
 
             if (m_enableDebug)
-                Debug.Log("[FRCFieldLocalizer] Loaded saved alignment");
+                Debug.Log("[FieldLocalizer] Loaded saved alignment");
         }
 
         private void OnDrawGizmos()
