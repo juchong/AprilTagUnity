@@ -240,11 +240,11 @@ public class AprilTagController : MonoBehaviour
 
     [Tooltip("Maximum image width allowed for GPU processing (to prevent crashes)")]
     [SerializeField]
-    private int m_gpuMaxImageWidth = 1280;
+    private int m_gpuMaxImageWidth = 1280; // Allow full camera resolution for GPU preprocessing
 
     [Tooltip("Maximum image height allowed for GPU processing (to prevent crashes)")]
     [SerializeField]
-    private int m_gpuMaxImageHeight = 1280;
+    private int m_gpuMaxImageHeight = 1280; // Allow full camera resolution for GPU preprocessing
 
     [Tooltip("Path to the main preprocessing compute shader (relative to Resources folder)")]
     [SerializeField]
@@ -742,6 +742,10 @@ public class AprilTagController : MonoBehaviour
         // Unsubscribe from permission events
         AprilTagPermissionsManager.OnAllPermissionsGranted -= OnAllPermissionsGranted;
         AprilTagPermissionsManager.OnPermissionsDenied -= OnPermissionsDenied;
+
+        // PERFORMANCE: Force GC to clean up any accumulated resources
+        Resources.UnloadUnusedAssets();
+        System.GC.Collect();
     }
 
     private void OnAllPermissionsGranted()
@@ -878,6 +882,7 @@ public class AprilTagController : MonoBehaviour
         // Get pixels - either preprocessed or raw
         // PERFORMANCE FIX: This expensive operation now only runs at detection rate (15-30 FPS),
         // not every frame (72-90 FPS), saving ~10-30ms per frame!
+        // NOTE: Actual resolution is limited by m_gpuMaxImageWidth/Height (set to 640x640 for Quest)
         try
         {
             if (
@@ -888,7 +893,7 @@ public class AprilTagController : MonoBehaviour
             {
                 try
                 {
-                    // Process image on GPU
+                    // Process image on GPU (will be downscaled to max dimensions automatically)
                     var processedTexture = m_gpuPreprocessor.ProcessTexture(wct);
                     if (processedTexture != null)
                     {
@@ -1375,6 +1380,18 @@ public class AprilTagController : MonoBehaviour
         if (Time.frameCount % 900 == 0) // Every ~12 seconds at 72 FPS
         {
             CleanupOldVisualizations(m_seenTagsBuffer);
+        }
+
+        // PERFORMANCE: Force periodic garbage collection to prevent buildup
+        // Quest has limited RAM and progressive degradation suggests memory pressure
+        if (Time.frameCount % 3600 == 0) // Every ~50 seconds at 72 FPS
+        {
+            System.GC.Collect();
+            if (m_enableAllDebugLogging)
+            {
+                float memory = System.GC.GetTotalMemory(false) / 1024f / 1024f;
+                Debug.Log($"[AprilTag] Forced GC cleanup. Memory: {memory:F1}MB");
+            }
         }
     }
 

@@ -96,6 +96,16 @@ namespace AprilTag
         [SerializeField]
         private bool m_enableDebug = true;
 
+        [Tooltip("Enable field pose logging (FIELD_POSE messages for external tools)")]
+        [SerializeField]
+        private bool m_enableFieldPoseLogging = true;
+
+        [Tooltip(
+            "Frame interval for debug logs (higher = less frequent, e.g., 300 = ~4 seconds at 72 FPS)"
+        )]
+        [SerializeField]
+        private int m_debugLogInterval = 300;
+
         [Tooltip("Show field coordinate frame")]
         [SerializeField]
         private bool m_visualizeField = true;
@@ -271,7 +281,7 @@ namespace AprilTag
             // Validate anchor manager
             if (m_anchorManager == null)
             {
-                if (m_enableDebug && Time.frameCount % 300 == 0)
+                if (m_enableDebug && Time.frameCount % m_debugLogInterval == 0)
                     Debug.LogWarning("[FRCFieldLocalizer] No anchor manager - cannot align");
                 return;
             }
@@ -288,7 +298,7 @@ namespace AprilTag
                 else if (m_isAligned && currentAnchorCount > m_lastSuccessfulAnchorCount)
                 {
                     // Try to improve alignment with more anchors
-                    if (m_enableDebug)
+                    if (m_enableDebug && Time.frameCount % m_debugLogInterval == 0)
                         Debug.Log(
                             $"[FRCFieldLocalizer] Attempting to improve alignment with {currentAnchorCount} anchors (had {m_lastSuccessfulAnchorCount})"
                         );
@@ -297,7 +307,12 @@ namespace AprilTag
             }
 
             // Log field position continuously once aligned and minimum anchors are met (for adb logcat filtering)
-            if (m_isAligned && m_anchorManager != null)
+            if (
+                m_enableFieldPoseLogging
+                && m_isAligned
+                && m_anchorManager != null
+                && Time.frameCount % (m_debugLogInterval / 8) == 0
+            )
             {
                 var currentAnchorCount = m_anchorManager.GetAnchorCount();
                 if (currentAnchorCount >= m_minAnchors)
@@ -325,9 +340,13 @@ namespace AprilTag
                         }
                     }
 
-                    Debug.Log(
-                        $"[FIELD_POSE] pos_ft:{fieldPosFeet.x:F3},{fieldPosFeet.y:F3},{fieldPosFeet.z:F3} rot:{fieldRot.eulerAngles.x:F1},{fieldRot.eulerAngles.y:F1},{fieldRot.eulerAngles.z:F1} anchors:{currentAnchorCount}"
-                    );
+                    // Rate limit field pose logging to reduce spam
+                    if (Time.frameCount % 36 == 0) // Every ~0.5 seconds at 72 FPS
+                    {
+                        Debug.Log(
+                            $"[FIELD_POSE] pos_ft:{fieldPosFeet.x:F3},{fieldPosFeet.y:F3},{fieldPosFeet.z:F3} rot:{fieldRot.eulerAngles.x:F1},{fieldRot.eulerAngles.y:F1},{fieldRot.eulerAngles.z:F1} anchors:{currentAnchorCount}"
+                        );
+                    }
                 }
             }
         }
@@ -397,12 +416,17 @@ namespace AprilTag
                 filteredPairs = RejectOutliers(pairs);
                 if (filteredPairs.Count < m_minAnchors)
                 {
-                    Debug.LogWarning(
-                        $"[FRCFieldLocalizer] Outlier rejection left only {filteredPairs.Count} anchors - using all {pairs.Count} anchors"
-                    );
+                    if (Time.frameCount % m_debugLogInterval == 0)
+                        Debug.LogWarning(
+                            $"[FRCFieldLocalizer] Outlier rejection left only {filteredPairs.Count} anchors - using all {pairs.Count} anchors"
+                        );
                     filteredPairs = pairs;
                 }
-                else if (filteredPairs.Count < pairs.Count && m_enableDebug)
+                else if (
+                    filteredPairs.Count < pairs.Count
+                    && m_enableDebug
+                    && Time.frameCount % m_debugLogInterval == 0
+                )
                 {
                     Debug.Log(
                         $"[FRCFieldLocalizer] Rejected {pairs.Count - filteredPairs.Count} outliers, using {filteredPairs.Count} anchors"
@@ -416,7 +440,8 @@ namespace AprilTag
             );
             if (!result.HasValue)
             {
-                Debug.LogWarning("[FRCFieldLocalizer] Transform calculation failed");
+                if (Time.frameCount % m_debugLogInterval == 0)
+                    Debug.LogWarning("[FRCFieldLocalizer] Transform calculation failed");
                 return;
             }
 
@@ -427,9 +452,10 @@ namespace AprilTag
 
             if (error > m_maxAlignmentError)
             {
-                Debug.LogWarning(
-                    $"[FRCFieldLocalizer] Alignment error {error:F3}m exceeds threshold {m_maxAlignmentError:F3}m - rejecting"
-                );
+                if (Time.frameCount % m_debugLogInterval == 0)
+                    Debug.LogWarning(
+                        $"[FRCFieldLocalizer] Alignment error {error:F3}m exceeds threshold {m_maxAlignmentError:F3}m - rejecting"
+                    );
                 return;
             }
 

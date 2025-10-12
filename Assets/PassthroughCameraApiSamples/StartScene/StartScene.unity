@@ -373,7 +373,7 @@ MonoBehaviour:
   m_scaleVizToTagSize: 1
   m_referenceCamera: {fileID: 463475071}
   m_positionOffset: {x: 0, y: 0, z: 0}
-  m_cornerPositionOffset: {x: -0.01, y: 0.01, z: 0}
+  m_cornerPositionOffset: {x: 0.025, y: 0.02, z: 0}
   m_saveRuntimeOffset: 1
   m_rotationOffset: {x: 0, y: 0, z: 0}
   m_usePassthroughRaycasting: 1
@@ -393,7 +393,7 @@ MonoBehaviour:
   m_horizontalFovDeg: 78
   m_enablePositionOffset: 1
   m_enableRotationOffset: 1
-  m_enableAllDebugLogging: 1
+  m_enableAllDebugLogging: 0
   m_enableConfigurationTool: 0
   m_enableGPUPreprocessing: 1
   m_gpuPreprocessingSettings:
@@ -410,9 +410,9 @@ MonoBehaviour:
     UseHalfPrecision: 1
     EnableDownsampling: 0
     DownsampleFactor: 0.5
-  m_debugSavePreprocessedImage: 1
+  m_debugSavePreprocessedImage: 0
   m_debugIncludeDetectionOverlay: 0
-  m_debugImageSaveInterval: 100
+  m_debugImageSaveInterval: 300
   m_maxDebugImages: 10
   m_debugSaveBothRawAndProcessed: 0
   m_gpuMaxImageWidth: 1280
@@ -2067,6 +2067,8 @@ MonoBehaviour:
   m_enableDirectionalErrorCheck: 1
   m_maxPerAxisError: 1
   m_enableDebug: 1
+  m_enableFieldPoseLogging: 1
+  m_debugLogInterval: 300
   m_visualizeField: 1
 --- !u!4 &370915504
 Transform:
