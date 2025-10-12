@@ -399,7 +399,7 @@ MonoBehaviour:
     EnableAdaptiveThreshold: 0
     AdaptiveBlockSize: 10
     AdaptiveConstant: -3.19
-    EnableHistogramEqualization: 1
+    EnableHistogramEqualization: 0
     HistogramStrength: 0.4
     EnableNoiseReduction: 1
     BlurRadius: 2
@@ -2049,19 +2049,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6ae8e3c40f2c5b14e980b26e66d014e3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AprilTag.FRCFieldLocalizer
+  m_aprilTagController: {fileID: 0}
   m_anchorManager: {fileID: 0}
   m_fieldLayout:
     fieldName: 2025-reefscape
     fieldSize: {x: 16.54175, y: 8.21055}
     tags: []
-  m_fieldLayoutName: 2025-reefscape-welded
+  m_selectedFieldLayout: 4
   m_minAnchors: 3
   m_autoAlign: 1
   m_persistAlignment: 1
-  m_useEmbeddedLayout: 1
-  m_maxAlignmentError: 100
-  m_enableOutlierRejection: 0
-  m_maxOutlierError: 100
+  m_maxAlignmentError: 1
+  m_enableOutlierRejection: 1
+  m_maxOutlierError: 1
+  m_maxOutlierAngularError: 15
+  m_enableDirectionalErrorCheck: 1
+  m_maxPerAxisError: 1
   m_enableDebug: 1
   m_visualizeField: 1
 --- !u!4 &370915504
