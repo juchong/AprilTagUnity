@@ -97,6 +97,7 @@ DerivedData/
 .vscode/
 # Cursor AI IDE
 .cursor/
+.continue/
 # Visual Studio configuration
 .vsconfig
 launch.json
