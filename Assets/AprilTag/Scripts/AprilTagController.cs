@@ -269,36 +269,8 @@ public class AprilTagController : MonoBehaviour
     private string m_histogramShaderPath = "AprilTagHistogram";
 
     [Header("PhotonVision-Inspired Filtering")]
-    // Note: These temporal filters work on detection results and complement GPU preprocessing
-    // GPU preprocessing improves image quality BEFORE detection
-    // These filters improve stability AFTER detection by analyzing temporal consistency
-    [Tooltip("Enable pose smoothing filter (reduces jitter)")]
-    [SerializeField]
-    private bool m_enablePoseSmoothing = true;
-
-    [Tooltip("Position smoothing time constant (seconds)")]
-    [SerializeField]
-    private float m_positionSmoothingTime = 0.1f;
-
-    [Tooltip("Rotation smoothing time constant (seconds)")]
-    [SerializeField]
-    private float m_rotationSmoothingTime = 0.15f;
-
-    [Tooltip("Enable multi-frame validation (rejects inconsistent detections)")]
-    [SerializeField]
-    private bool m_enableMultiFrameValidation = true;
-
-    [Tooltip("Number of frames to validate against")]
-    [SerializeField]
-    private int m_validationFrameCount = 3;
-
-    [Tooltip("Maximum position deviation for validation (meters)")]
-    [SerializeField]
-    private float m_maxPositionDeviation = 0.2f; // Increased from 0.05f for Quest jitter
-
-    [Tooltip("Maximum rotation deviation for validation (degrees)")]
-    [SerializeField]
-    private float m_maxRotationDeviation = 30f; // Increased from 15f for Quest jitter
+    // Note: Pose filtering configuration now in AprilTagPoseFilter component
+    // This component is auto-created and configured automatically
 
     [Tooltip(
         "Enable corner quality assessment (Note: GPU preprocessing provides similar benefits through noise reduction and edge enhancement)"
@@ -356,16 +328,6 @@ public class AprilTagController : MonoBehaviour
     [Range(0.0f, 1.0f)]
     [SerializeField]
     private float m_anchorConfidenceThreshold = 0.1f; // Lowered to allow low-confidence tags
-
-    [Header("Validation Time Thresholds")]
-    [Tooltip("Time window for considering detections as recent (seconds)")]
-    [SerializeField]
-    private float m_validationRecentDetectionTime = 1.0f;
-
-    [Tooltip("Confidence value for single detections")]
-    [Range(0.0f, 1.0f)]
-    [SerializeField]
-    private float m_singleDetectionConfidence = 0.5f;
 
     [Tooltip("Distance-based quality decay factor")]
     [SerializeField]

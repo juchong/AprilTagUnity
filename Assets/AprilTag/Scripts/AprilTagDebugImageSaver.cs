@@ -23,17 +23,9 @@ namespace AprilTag
         [SerializeField]
         private bool m_includeDetectionOverlay = true;
 
-        [Tooltip("Debug image save interval (frames between saves, 0 = save every detection)")]
-        [SerializeField]
-        private int m_saveInterval = 300;
-
         [Tooltip("Maximum debug images to keep (older ones are deleted)")]
         [SerializeField]
         private int m_maxImages = 10;
-
-        [Tooltip("Save both raw and preprocessed images for comparison")]
-        [SerializeField]
-        private bool m_saveBothRawAndProcessed = false;
 
         [Header("References")]
         [Tooltip("AprilTag controller for detection data")]

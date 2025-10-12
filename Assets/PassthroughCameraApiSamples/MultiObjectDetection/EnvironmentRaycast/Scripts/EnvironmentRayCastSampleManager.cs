@@ -3,7 +3,6 @@
 using Meta.XR;
 using Meta.XR.Samples;
 using UnityEngine;
-
 #if UNITY_ANDROID
 using UnityEngine.Android;
 #endif
@@ -14,13 +13,17 @@ namespace PassthroughCameraSamples.MultiObjectDetection
     public class EnvironmentRayCastSampleManager : MonoBehaviour
     {
         private const string SPATIALPERMISSION = "com.oculus.permission.USE_SCENE";
-        [SerializeField] private EnvironmentRaycastManager m_raycastManager;
+
+        [SerializeField]
+        private EnvironmentRaycastManager m_raycastManager;
 
         private void Start()
         {
             if (!EnvironmentRaycastManager.IsSupported)
             {
-                Debug.LogError("EnvironmentRaycastManager is not supported: please read the official documentation to get more details. (https://developers.meta.com/horizon/documentation/unity/unity-depthapi-overview/)");
+                Debug.LogError(
+                    "EnvironmentRaycastManager is not supported: please read the official documentation to get more details. (https://developers.meta.com/horizon/documentation/unity/unity-depthapi-overview/)"
+                );
             }
         }
 

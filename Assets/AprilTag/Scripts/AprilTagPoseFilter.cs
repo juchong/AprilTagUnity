@@ -58,10 +58,6 @@ namespace AprilTag
         [SerializeField]
         private bool m_enableDebugLogging = false;
 
-        [Tooltip("Frame interval for debug logs")]
-        [SerializeField]
-        private int m_logInterval = 300;
-
         // Detection history for multi-frame validation
         private readonly Dictionary<int, Queue<TagDetectionHistory>> m_detectionHistory = new();
 
