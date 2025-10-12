@@ -221,8 +221,19 @@ namespace AprilTag
 
         private void Start()
         {
+            StartCoroutine(InitializeAsync());
+        }
+
+        /// <summary>
+        /// Initialize asynchronously to give building blocks time to set up
+        /// </summary>
+        private System.Collections.IEnumerator InitializeAsync()
+        {
             // Initialize Meta XR Building Blocks
             InitializeBuildingBlocks();
+
+            // Wait a frame for building blocks to initialize
+            yield return null;
 
             // Subscribe to building block events
             SubscribeToBuildingBlockEvents();
@@ -241,7 +252,7 @@ namespace AprilTag
 
             // Automatically load saved anchors on startup after a short delay
             // This ensures all systems are initialized before loading
-            StartCoroutine(LoadAnchorsOnStartup());
+            yield return LoadAnchorsOnStartup();
         }
 
         /// <summary>
@@ -371,41 +382,63 @@ namespace AprilTag
         }
 
         /// <summary>
-        /// Initialize the Meta XR Building Blocks
+        /// Initialize the Meta XR Building Blocks (auto-create if needed)
         /// </summary>
         private void InitializeBuildingBlocks()
         {
-            // Find building blocks if not assigned
+            // Find or create SpatialAnchorSpawner
             if (m_spatialAnchorSpawner == null)
             {
                 m_spatialAnchorSpawner = FindFirstObjectByType<SpatialAnchorSpawnerBuildingBlock>();
                 if (m_spatialAnchorSpawner == null)
                 {
-                    Debug.LogWarning(
-                        "[SpatialAnchorManager] SpatialAnchorSpawnerBuildingBlock not found"
-                    );
+                    var spawnerObj = new GameObject("SpatialAnchorSpawner");
+                    m_spatialAnchorSpawner =
+                        spawnerObj.AddComponent<SpatialAnchorSpawnerBuildingBlock>();
+
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            "[SpatialAnchorManager] Auto-created SpatialAnchorSpawnerBuildingBlock"
+                        );
+                    }
                 }
             }
 
+            // Find or create SpatialAnchorLoader
             if (m_spatialAnchorLoader == null)
             {
                 m_spatialAnchorLoader = FindFirstObjectByType<SpatialAnchorLoaderBuildingBlock>();
                 if (m_spatialAnchorLoader == null)
                 {
-                    Debug.LogWarning(
-                        "[SpatialAnchorManager] SpatialAnchorLoaderBuildingBlock not found"
-                    );
+                    var loaderObj = new GameObject("SpatialAnchorLoader");
+                    m_spatialAnchorLoader =
+                        loaderObj.AddComponent<SpatialAnchorLoaderBuildingBlock>();
+
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            "[SpatialAnchorManager] Auto-created SpatialAnchorLoaderBuildingBlock"
+                        );
+                    }
                 }
             }
 
+            // Find or create SpatialAnchorCore
             if (m_spatialAnchorCore == null)
             {
                 m_spatialAnchorCore = FindFirstObjectByType<SpatialAnchorCoreBuildingBlock>();
                 if (m_spatialAnchorCore == null)
                 {
-                    Debug.LogWarning(
-                        "[SpatialAnchorManager] SpatialAnchorCoreBuildingBlock not found"
-                    );
+                    var coreObj = new GameObject("SpatialAnchorCore");
+                    m_spatialAnchorCore = coreObj.AddComponent<SpatialAnchorCoreBuildingBlock>();
+
+                    if (m_enableDebugLogging)
+                    {
+                        Debug.Log(
+                            "[SpatialAnchorManager] Auto-created SpatialAnchorCoreBuildingBlock"
+                        );
+                    }
                 }
             }
         }
@@ -786,11 +819,8 @@ namespace AprilTag
             StorePositionForTagId(tagId, anchorPosition, rotation);
 
             // Use the spawner building block to create the anchor at the specified position
-            if (m_spatialAnchorSpawner != null)
+            if (m_spatialAnchorSpawner != null && m_spatialAnchorSpawner.enabled)
             {
-                // Ensure the spawner is configured to not follow hand
-                m_spatialAnchorSpawner.FollowHand = false;
-
                 // Store the original prefab to restore later
                 var originalPrefab = m_spatialAnchorSpawner.AnchorPrefab;
 
