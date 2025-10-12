@@ -1385,7 +1385,11 @@ public class AprilTagTransforms : MonoBehaviour
         var avgAngleDeviation = totalAngleDeviation / 4f;
         if (avgAngleDeviation > maxAngleDeviation)
         {
-            quality *= Mathf.Lerp(1.0f, 0.2f, (avgAngleDeviation - maxAngleDeviation) / (maxAngleDeviation * 2f));
+            quality *= Mathf.Lerp(
+                1.0f,
+                0.2f,
+                (avgAngleDeviation - maxAngleDeviation) / (maxAngleDeviation * 2f)
+            );
         }
 
         // Check for convexity
