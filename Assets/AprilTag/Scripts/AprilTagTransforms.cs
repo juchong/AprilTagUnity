@@ -459,6 +459,8 @@ public class AprilTagTransforms : MonoBehaviour
                 m_maxDetectionDistance
             );
 
+            // Apply distance scaling using static method (fallback path)
+            // Controller's distance adaptation system handles the primary path
             if (m_enableDistanceScaling)
             {
                 clampedDistance = ApplyDistanceScaling(clampedDistance);
@@ -1259,30 +1261,35 @@ public class AprilTagTransforms : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Apply distance scaling with physics-based correction
+    /// NOTE: This is a static wrapper for backward compatibility
+    /// Prefer using AprilTagDistanceAdaptation instance for full functionality
+    /// </summary>
     public static float ApplyDistanceScaling(float distance)
     {
-        // Apply non-linear scaling to improve accuracy across the wide distance range
-        // This helps with both very close (0.5m) and very far (18m) tags
+        // Static fallback implementation for 0.3m - 5m range
+        // Matches AprilTagDistanceAdaptation behavior
 
-        if (distance <= 1.0f)
+        if (distance < 1.0f)
         {
-            // For close tags (0.5m - 1m), use slight compression to prevent overshooting
-            return distance * 0.9f;
+            // Very close range (0.3-1m): gentle compression
+            return distance * 0.95f;
         }
-        else if (distance <= 5.0f)
+        else if (distance < 2.0f)
         {
-            // For medium distance tags (1m - 5m), use linear scaling
-            return distance;
+            // Close-medium range (1-2m): minimal correction
+            return distance * 0.98f;
         }
-        else if (distance <= 10.0f)
+        else if (distance < 3.5f)
         {
-            // For far tags (5m - 10m), use slight expansion
-            return distance * 1.1f;
+            // Medium range (2-3.5m): linear (optimal)
+            return distance * 1.0f;
         }
         else
         {
-            // For very far tags (10m - 18m), use more expansion
-            return distance * 1.2f;
+            // Far range (3.5-5m): gentle expansion
+            return distance * 1.02f;
         }
     }
 

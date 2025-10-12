@@ -107,9 +107,9 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private float m_minDetectionDistance = 0.3f;
 
-    [Tooltip("Maximum detection distance in meters (for very far tags)")]
+    [Tooltip("Maximum detection distance in meters (optimized for 1280x1280 resolution)")]
     [SerializeField]
-    private float m_maxDetectionDistance = 20.0f;
+    private float m_maxDetectionDistance = 5.0f;
 
     [Tooltip("Enable distance-based scaling adjustments")]
     [SerializeField]
@@ -145,14 +145,20 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private float m_maxDetectionsPerSecond = 15f;
 
+    [Header("Adaptive Decimation (Phase 1)")]
+    [Tooltip(
+        "Enable adaptive decimation based on tag distance (0.3m-5m range). Currently framework only - full implementation pending."
+    )]
+    [SerializeField]
+    private bool m_enableAdaptiveDecimation = false; // Disabled until two-pass detection implemented
+
     [Header("Async Detection")]
     [Tooltip("Run detection on background thread to prevent main thread blocking")]
     [SerializeField]
     private bool m_useAsyncDetection = true;
 
-    [Tooltip("Horizontal FOV (degrees) of the passthrough camera.")]
-    [SerializeField]
-    private float m_horizontalFovDeg = 78f;
+    // Fallback FOV value if camera intrinsics unavailable (not exposed in inspector)
+    private const float FALLBACK_HORIZONTAL_FOV_DEG = 78f;
 
     [Header("Calibration Offsets")]
     [Tooltip("Enable position offset")]
@@ -387,6 +393,9 @@ public class AprilTagController : MonoBehaviour
     // Debug image saver for Quest debugging
     private AprilTagDebugImageSaver m_debugImageSaver;
 
+    // Distance adaptation system (Phase 1 & 3)
+    private AprilTagDistanceAdaptation m_distanceAdaptation;
+
     // Headset pose tracking for continuous adjustment
     private Quaternion m_lastHeadsetRotation = Quaternion.identity;
     private Vector3 m_lastHeadsetPosition = Vector3.zero;
@@ -431,6 +440,38 @@ public class AprilTagController : MonoBehaviour
             return m_webcamPipeline.GetCorrectCameraReference();
         }
         return Camera.main != null ? Camera.main.transform : transform;
+    }
+
+    /// <summary>
+    /// Get horizontal FOV calculated from camera intrinsics
+    /// </summary>
+    private float GetCalculatedFOV()
+    {
+        try
+        {
+            var eye =
+                m_webcamPipeline != null
+                    ? m_webcamPipeline.GetWebCamManagerEye()
+                    : PassthroughCameraEye.Left;
+
+            var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
+            float focalLengthX = intrinsics.FocalLength.x;
+            float imageWidth = intrinsics.Resolution.x;
+
+            // Calculate FOV: FOV = 2 * atan(imageWidth / (2 * focalLength))
+            float fovRadians = 2f * Mathf.Atan(imageWidth / (2f * focalLengthX));
+            return fovRadians * Mathf.Rad2Deg;
+        }
+        catch (System.Exception e)
+        {
+            if (m_enableAllDebugLogging)
+            {
+                Debug.LogWarning(
+                    $"[AprilTag] Failed to calculate FOV from intrinsics: {e.Message}. Using fallback: {FALLBACK_HORIZONTAL_FOV_DEG}°"
+                );
+            }
+            return FALLBACK_HORIZONTAL_FOV_DEG; // Fallback to constant value
+        }
     }
 
     private void Awake()
@@ -532,6 +573,9 @@ public class AprilTagController : MonoBehaviour
                 ?? gameObject.GetComponent<AprilTagDebugImageSaver>()
                 ?? gameObject.AddComponent<AprilTagDebugImageSaver>();
         }
+
+        // Initialize distance adaptation system (Phase 1 & 3)
+        // Will be fully configured once camera dimensions are known in Update()
     }
 
     /// <summary>
@@ -774,17 +818,68 @@ public class AprilTagController : MonoBehaviour
         if (Time.time < m_nextDetectT)
             return;
 
+        // Initialize distance adaptation system if needed (once camera dimensions are known)
+        if (m_distanceAdaptation == null)
+        {
+            // Get camera intrinsics from Meta Passthrough Camera API
+            var eye =
+                m_webcamPipeline != null
+                    ? m_webcamPipeline.GetWebCamManagerEye()
+                    : PassthroughCameraEye.Left;
+
+            var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
+            float focalLengthX = intrinsics.FocalLength.x;
+
+            // Calculate actual FOV from intrinsics for logging
+            float calculatedFovDeg =
+                2f * Mathf.Atan(wct.width / (2f * focalLengthX)) * Mathf.Rad2Deg;
+
+            // Initialize with focal length from intrinsics
+            m_distanceAdaptation = new AprilTagDistanceAdaptation(
+                wct.width,
+                wct.height,
+                focalLengthX,
+                m_enableAllDebugLogging
+            );
+
+            if (m_enableAllDebugLogging)
+            {
+                Debug.Log($"[AprilTag] Distance adaptation initialized for 0.3m-5m range");
+                Debug.Log(
+                    $"[AprilTag] Camera intrinsics: focal length = {focalLengthX:F1}px, calculated FOV = {calculatedFovDeg:F1}°"
+                );
+                Debug.Log(
+                    $"[AprilTag] Using camera eye: {eye}, resolution: {intrinsics.Resolution.x}x{intrinsics.Resolution.y}"
+                );
+
+                // Log detectability info for reference tag size
+                float maxDistance = m_distanceAdaptation.GetMaximumDetectableDistance(
+                    m_tagSizeMeters
+                );
+                Debug.Log(
+                    $"[AprilTag] Tag size {m_tagSizeMeters}m: max detectable distance = {maxDistance:F2}m"
+                );
+            }
+        }
+
+        // Determine decimation factor (adaptive or fixed)
+        int targetDecimation = m_decimate;
+
+        // Note: For initial detection, we use fixed decimation
+        // Adaptive decimation will be applied per-tag in visualization phase
+        // This allows us to detect tags at all distances first, then refine if needed
+
         // Ensure detector matches the feed dimensions
         if (
             m_detector == null
             || m_detW != wct.width
             || m_detH != wct.height
-            || m_detDecim != m_decimate
+            || m_detDecim != targetDecimation
         )
         {
             if (m_enableAllDebugLogging)
                 Debug.Log(
-                    $"[AprilTag] Recreating detector: {wct.width}x{wct.height}, decimate={m_decimate}"
+                    $"[AprilTag] Recreating detector: {wct.width}x{wct.height}, decimate={targetDecimation}, adaptive={m_enableAdaptiveDecimation}"
                 );
             // Recreate detector using pipeline factory
             DisposeDetector();
@@ -794,12 +889,17 @@ public class AprilTagController : MonoBehaviour
                         wct.width,
                         wct.height,
                         m_tagFamily,
-                        m_decimate
+                        targetDecimation
                     )
-                    : new TagDetector(wct.width, wct.height, m_tagFamily, Mathf.Max(1, m_decimate));
+                    : new TagDetector(
+                        wct.width,
+                        wct.height,
+                        m_tagFamily,
+                        Mathf.Max(1, targetDecimation)
+                    );
             m_detW = wct.width;
             m_detH = wct.height;
-            m_detDecim = Mathf.Max(1, m_decimate);
+            m_detDecim = Mathf.Max(1, targetDecimation);
         }
 
         // Ensure GPU preprocessor matches the feed dimensions
@@ -945,7 +1045,8 @@ public class AprilTagController : MonoBehaviour
         else
         {
             // Sync path: Run detection on main thread (original behavior)
-            m_detector.ProcessImage(m_rgba.AsSpan(), m_horizontalFovDeg, m_tagSizeMeters);
+            float calculatedFov = GetCalculatedFOV();
+            m_detector.ProcessImage(m_rgba.AsSpan(), calculatedFov, m_tagSizeMeters);
             m_nextDetectT = Time.time + 1f / Mathf.Max(1f, m_maxDetectionsPerSecond);
         }
 
@@ -960,8 +1061,9 @@ public class AprilTagController : MonoBehaviour
             var tagCount = m_detector.DetectedTags?.Count() ?? 0;
             if (tagCount == 0)
             {
+                float currentFov = GetCalculatedFOV();
                 Debug.Log(
-                    $"[AprilTag] No tags detected. Detector: {m_detW}x{m_detH}, decimation={m_detDecim}, tagSize={m_tagSizeMeters}m, FOV={m_horizontalFovDeg}°, GPU={m_enableGPUPreprocessing}"
+                    $"[AprilTag] No tags detected. Detector: {m_detW}x{m_detH}, decimation={m_detDecim}, tagSize={m_tagSizeMeters}m, FOV={currentFov:F1}°, GPU={m_enableGPUPreprocessing}"
                 );
 
                 // Additional debug info
@@ -989,9 +1091,13 @@ public class AprilTagController : MonoBehaviour
                 Debug.Log($"[AprilTag] SUCCESS! Detected {tagCount} tags!");
                 foreach (var tag in m_detector.DetectedTags.Take(5)) // Log first 5 tags
                 {
-                    Debug.Log(
-                        $"[AprilTag] - Tag ID: {tag.ID}, Position: {tag.Position}, Rotation: {tag.Rotation.eulerAngles}"
-                    );
+                    var distance = tag.Position.magnitude;
+                    var diagnostics =
+                        m_distanceAdaptation != null
+                            ? m_distanceAdaptation.GetDistanceDiagnostics(distance, m_tagSizeMeters)
+                            : $"Distance: {distance:F2}m (no adaptation)";
+
+                    Debug.Log($"[AprilTag] - Tag ID: {tag.ID}, {diagnostics}");
                 }
             }
         }
@@ -1148,11 +1254,35 @@ public class AprilTagController : MonoBehaviour
                     adjustedPosition += m_positionOffset;
                 }
 
-                // Apply distance scaling if enabled
+                // Apply distance scaling if enabled (Phase 3: Physics-based scaling)
                 if (m_enableDistanceScaling)
                 {
                     var distance = adjustedPosition.magnitude;
-                    var scaledDistance = AprilTagTransforms.ApplyDistanceScaling(distance);
+
+                    // Use distance adaptation system for physics-based correction
+                    float scaledDistance;
+                    if (m_distanceAdaptation != null)
+                    {
+                        scaledDistance = m_distanceAdaptation.ApplyDistanceScaling(
+                            distance,
+                            m_tagSizeMeters
+                        );
+
+                        if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
+                        {
+                            var diagnostics = m_distanceAdaptation.GetDistanceDiagnostics(
+                                distance,
+                                m_tagSizeMeters
+                            );
+                            Debug.Log($"[AprilTag] Tag {t.ID} distance adaptation: {diagnostics}");
+                        }
+                    }
+                    else
+                    {
+                        // Fallback to static method if adaptation not initialized
+                        scaledDistance = AprilTagTransforms.ApplyDistanceScaling(distance);
+                    }
+
                     adjustedPosition = adjustedPosition.normalized * scaledDistance;
                 }
 
@@ -1519,14 +1649,29 @@ public class AprilTagController : MonoBehaviour
             Debug.Log($"[AprilTag] Calculating confidence for tag {tag.ID}:");
         }
 
-        // Apply corner quality assessment if enabled
-        if (m_enableCornerQualityAssessment)
+        // Phase 3: Use distance adaptation for physics-based confidence
+        if (m_distanceAdaptation != null)
         {
-            // Use a simplified corner quality calculation
-            // In a real implementation, you might want to access actual corner quality data
+            var distance = tag.Position.magnitude;
+            var distanceConfidence = m_distanceAdaptation.CalculateDetectionConfidence(
+                distance,
+                m_tagSizeMeters
+            );
+            confidence *= distanceConfidence;
+
+            if (m_enableAllDebugLogging)
+            {
+                Debug.Log(
+                    $"[AprilTag]   Distance confidence ({distance:F2}m): {distanceConfidence:F3}, total: {confidence:F3}"
+                );
+            }
+        }
+        else if (m_enableCornerQualityAssessment)
+        {
+            // Fallback: Use simplified distance-based quality
             var cornerQuality = Mathf.Clamp01(
                 1.0f - tag.Position.magnitude * m_distanceQualityDecayFactor
-            ); // Distance-based quality
+            );
             confidence *= cornerQuality;
 
             if (m_enableAllDebugLogging)
@@ -1700,9 +1845,33 @@ public class AprilTagController : MonoBehaviour
         Debug.Log($"  - Position Scale Factor: {m_positionScaleFactor}");
         Debug.Log($"  - Distance Scaling: {m_enableDistanceScaling}");
         Debug.Log($"  - Passthrough Raycasting: {m_usePassthroughRaycasting}");
-        Debug.Log($"  - Min Detection Distance: {m_minDetectionDistance}");
-        Debug.Log($"  - Max Detection Distance: {m_maxDetectionDistance}");
+        Debug.Log($"  - Min Detection Distance: {m_minDetectionDistance}m");
+        Debug.Log($"  - Max Detection Distance: {m_maxDetectionDistance}m");
+        Debug.Log($"  - Adaptive Decimation: {m_enableAdaptiveDecimation}");
+        Debug.Log($"  - Tag Size: {m_tagSizeMeters}m");
         Debug.Log($"  - Camera: {cam.name} at {cam.position:F3}");
+
+        // Log distance adaptation diagnostics if available
+        if (m_distanceAdaptation != null)
+        {
+            Debug.Log($"[AprilTag] Distance Adaptation Diagnostics:");
+            float maxDist = m_distanceAdaptation.GetMaximumDetectableDistance(m_tagSizeMeters);
+            Debug.Log($"  - Max detectable distance for {m_tagSizeMeters}m tag: {maxDist:F2}m");
+
+            // Test distances
+            float[] testDistances = { 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f };
+            foreach (var dist in testDistances)
+            {
+                if (dist <= maxDist)
+                {
+                    string diag = m_distanceAdaptation.GetDistanceDiagnostics(
+                        dist,
+                        m_tagSizeMeters
+                    );
+                    Debug.Log($"  - {diag}");
+                }
+            }
+        }
     }
 
     private void HandleQuestDebugInput()
@@ -2217,7 +2386,8 @@ public class AprilTagController : MonoBehaviour
             {
                 // PERFORMANCE: No Array.Copy needed - pixels array is already on heap
                 // and won't be modified until next detection cycle
-                m_detector.ProcessImage(pixels.AsSpan(), m_horizontalFovDeg, m_tagSizeMeters);
+                float calculatedFov = GetCalculatedFOV();
+                m_detector.ProcessImage(pixels.AsSpan(), calculatedFov, m_tagSizeMeters);
             }
         }
         catch (System.Exception ex)
