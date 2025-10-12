@@ -419,6 +419,12 @@ public class AprilTagController : MonoBehaviour
     // Shared transforms helper (single source of truth for transform math)
     private AprilTagTransforms m_transforms;
 
+    // Pose filter for temporal smoothing and validation
+    private AprilTagPoseFilter m_poseFilter;
+
+    // Debug image saver for Quest debugging
+    private AprilTagDebugImageSaver m_debugImageSaver;
+
     // Headset pose tracking for continuous adjustment
     private Quaternion m_lastHeadsetRotation = Quaternion.identity;
     private Vector3 m_lastHeadsetPosition = Vector3.zero;
@@ -433,55 +439,6 @@ public class AprilTagController : MonoBehaviour
     private readonly Dictionary<int, Transform> m_vizById = new();
     private int m_previousTagCount = 0;
 
-    // PhotonVision-inspired filtering data structures
-    [Serializable]
-    public class TagDetectionHistory
-    {
-        public Vector3 Position;
-        public Quaternion Rotation;
-        public float Timestamp;
-        public float CornerQuality;
-        public bool IsValid;
-
-        public TagDetectionHistory(Vector3 pos, Quaternion rot, float quality)
-        {
-            Position = pos;
-            Rotation = rot;
-            Timestamp = Time.time;
-            CornerQuality = quality;
-            IsValid = true;
-        }
-    }
-
-    [Serializable]
-    public class FilteredTagPose
-    {
-        public Vector3 FilteredPosition;
-        public Quaternion FilteredRotation;
-        public Vector3 RawPosition;
-        public Quaternion RawRotation;
-        public float LastUpdateTime;
-        public bool IsInitialized;
-        public int FramesSinceFirstDetection; // Track how many frames this tag has been tracked
-
-        public FilteredTagPose()
-        {
-            FilteredPosition = Vector3.zero;
-            FilteredRotation = Quaternion.identity;
-            RawPosition = Vector3.zero;
-            RawRotation = Quaternion.identity;
-            LastUpdateTime = 0f;
-            IsInitialized = false;
-            FramesSinceFirstDetection = 0;
-        }
-    }
-
-    // Detection history for multi-frame validation (PhotonVision approach)
-    private readonly Dictionary<int, Queue<TagDetectionHistory>> m_detectionHistory = new();
-
-    // Filtered poses for smoothing (PhotonVision approach)
-    private readonly Dictionary<int, FilteredTagPose> m_filteredPoses = new();
-
     // Track when visualizations were last active (for cleanup)
     private readonly Dictionary<int, float> m_vizLastActiveTime = new();
 
@@ -489,7 +446,6 @@ public class AprilTagController : MonoBehaviour
     private readonly HashSet<int> m_seenTagsBuffer = new();
     private readonly HashSet<int> m_currentTagIdsBuffer = new();
     private readonly List<int> m_tagsToRemoveBuffer = new();
-    private TagDetectionHistory[] m_recentDetectionsBuffer; // Allocated on first use
 
     private void OnDisable() => DisposeDetector();
 
@@ -595,6 +551,24 @@ public class AprilTagController : MonoBehaviour
                 FindFirstObjectByType<AprilTagVisualization>()
                 ?? gameObject.GetComponent<AprilTagVisualization>()
                 ?? gameObject.AddComponent<AprilTagVisualization>();
+        }
+
+        // Ensure we have pose filter
+        if (m_poseFilter == null)
+        {
+            m_poseFilter =
+                FindFirstObjectByType<AprilTagPoseFilter>()
+                ?? gameObject.GetComponent<AprilTagPoseFilter>()
+                ?? gameObject.AddComponent<AprilTagPoseFilter>();
+        }
+
+        // Ensure we have debug image saver
+        if (m_debugImageSaver == null)
+        {
+            m_debugImageSaver =
+                FindFirstObjectByType<AprilTagDebugImageSaver>()
+                ?? gameObject.GetComponent<AprilTagDebugImageSaver>()
+                ?? gameObject.AddComponent<AprilTagDebugImageSaver>();
         }
     }
 
@@ -1263,7 +1237,17 @@ public class AprilTagController : MonoBehaviour
             )
             {
                 var corners = m_transforms.ExtractCornersFromRawDetection(t.ID, rawDetections);
-                cornerQuality = CalculateCornerQuality(corners);
+                cornerQuality = m_transforms.CalculateCornerQuality(
+                    corners,
+                    m_minCornerSideLength,
+                    m_maxCornerSideLength,
+                    m_maxAspectRatio,
+                    m_maxCornerAngleDeviation,
+                    m_smallTagQualityPenalty,
+                    m_largeTagQualityPenalty,
+                    m_elongatedTagQualityPenalty,
+                    m_nonConvexQualityPenalty
+                );
 
                 // Check corner quality threshold
                 if (cornerQuality < m_minCornerQuality)
@@ -1289,7 +1273,15 @@ public class AprilTagController : MonoBehaviour
             }
 
             // Multi-frame validation (PhotonVision approach)
-            if (!ValidateTagDetection(t.ID, worldPosition, worldRotation, cornerQuality))
+            if (
+                m_poseFilter != null
+                && !m_poseFilter.ValidateTagDetection(
+                    t.ID,
+                    worldPosition,
+                    worldRotation,
+                    cornerQuality
+                )
+            )
             {
                 continue; // Skip this detection - failed validation
             }
@@ -1298,36 +1290,32 @@ public class AprilTagController : MonoBehaviour
             var finalPosition = worldPosition;
             var finalRotation = worldRotation;
 
-            if (m_enablePoseSmoothing)
+            if (m_poseFilter != null)
             {
-                // Initialize or get existing filtered pose
-                if (!m_filteredPoses.ContainsKey(t.ID))
-                {
-                    m_filteredPoses[t.ID] = new FilteredTagPose();
-                }
-
-                var filteredPose = m_filteredPoses[t.ID];
+                // Get or create filtered pose
+                var filteredPose = m_poseFilter.GetFilteredPose(t.ID);
                 var deltaTime = Time.time - filteredPose.LastUpdateTime;
 
                 // Increment frame counter
                 filteredPose.FramesSinceFirstDetection++;
 
-                // Only mark as initialized after sufficient stable frames to prevent
-                // anchors from being placed during the initial position stabilization period
-                const int MIN_FRAMES_FOR_INITIALIZATION = 10; // ~0.17s at 60fps
+                // Only mark as initialized after sufficient stable frames
+                const int MIN_FRAMES_FOR_INITIALIZATION = 10;
                 if (filteredPose.FramesSinceFirstDetection >= MIN_FRAMES_FOR_INITIALIZATION)
                 {
                     filteredPose.IsInitialized = true;
                 }
 
-                // Apply PhotonVision-inspired temporal filtering
-                finalPosition = FilterTagPosition(
+                // Apply temporal filtering
+                finalPosition = m_poseFilter.FilterTagPosition(
+                    t.ID,
                     worldPosition,
                     filteredPose.FilteredPosition,
                     deltaTime,
                     filteredPose.IsInitialized
                 );
-                finalRotation = FilterTagRotation(
+                finalRotation = m_poseFilter.FilterTagRotation(
+                    t.ID,
                     worldRotation,
                     filteredPose.FilteredRotation,
                     deltaTime,
@@ -1345,7 +1333,7 @@ public class AprilTagController : MonoBehaviour
                 if (m_enableAllDebugLogging && !filteredPose.IsInitialized)
                 {
                     Debug.Log(
-                        $"[AprilTag] Tag {t.ID} initializing: {filteredPose.FramesSinceFirstDetection}/{MIN_FRAMES_FOR_INITIALIZATION} frames"
+                        $"[Controller] Tag {t.ID} initializing: {filteredPose.FramesSinceFirstDetection}/{MIN_FRAMES_FOR_INITIALIZATION} frames"
                     );
                 }
             }
@@ -1491,10 +1479,8 @@ public class AprilTagController : MonoBehaviour
             // CRITICAL: Only process anchors for tags with initialized filtered poses
             // This prevents placing anchors at unstable initial positions during the
             // pose smoothing "warm-up" period when visualizations appear "frozen"
-            if (
-                !m_filteredPoses.TryGetValue(tag.ID, out var filteredPose)
-                || !filteredPose.IsInitialized
-            )
+            var filteredPose = m_poseFilter?.GetFilteredPose(tag.ID);
+            if (filteredPose == null || !filteredPose.IsInitialized)
             {
                 if (m_enableAllDebugLogging)
                 {
@@ -1545,18 +1531,16 @@ public class AprilTagController : MonoBehaviour
             m_currentTagIdsBuffer.Add(tag.ID);
         }
 
-        // Clean up filtered poses for tags no longer detected
-        foreach (var tagId in m_filteredPoses.Keys.ToArray()) // ToArray() to avoid modification during iteration
+        // Clean up tracking for tags no longer detected
+        if (m_poseFilter != null)
         {
-            if (!m_currentTagIdsBuffer.Contains(tagId))
+            foreach (var tagId in m_poseFilter.GetTrackedTagIds().ToArray())
             {
-                m_spatialAnchorManager.RemoveTagTracking(tagId);
-
-                // MEMORY LEAK FIX: Remove from filtered poses dictionary
-                m_filteredPoses.Remove(tagId);
-
-                // MEMORY LEAK FIX: Remove from detection history dictionary
-                m_detectionHistory.Remove(tagId);
+                if (!m_currentTagIdsBuffer.Contains(tagId))
+                {
+                    m_spatialAnchorManager?.RemoveTagTracking(tagId);
+                    m_poseFilter.RemoveTagTracking(tagId);
+                }
             }
         }
     }
@@ -1592,36 +1576,34 @@ public class AprilTagController : MonoBehaviour
         }
 
         // Apply multi-frame validation confidence
-        if (m_enableMultiFrameValidation && m_detectionHistory.TryGetValue(tag.ID, out var history))
+        if (m_poseFilter != null)
         {
-            var validationConfidence = CalculateValidationConfidence(history);
+            var validationConfidence = m_poseFilter.CalculateValidationConfidence(tag.ID);
             confidence *= validationConfidence;
 
             if (m_enableAllDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTag]   Validation confidence: {validationConfidence:F3}, confidence after: {confidence:F3}"
+                    $"[Controller]   Validation confidence: {validationConfidence:F3}, confidence after: {confidence:F3}"
                 );
             }
         }
 
         // Apply pose smoothing confidence
-        if (m_enablePoseSmoothing && m_filteredPoses.TryGetValue(tag.ID, out var filteredPose))
+        var filteredPose = m_poseFilter?.GetFilteredPose(tag.ID);
+        if (filteredPose != null && filteredPose.IsInitialized)
         {
-            if (filteredPose.IsInitialized)
-            {
-                // Higher confidence for more stable poses - much gentler decay
-                var stabilityConfidence = Mathf.Clamp01(
-                    1.0f - (Time.time - filteredPose.LastUpdateTime) * m_stabilityDecayFactor
-                );
-                confidence *= stabilityConfidence;
+            // Higher confidence for more stable poses
+            var stabilityConfidence = Mathf.Clamp01(
+                1.0f - (Time.time - filteredPose.LastUpdateTime) * m_stabilityDecayFactor
+            );
+            confidence *= stabilityConfidence;
 
-                if (m_enableAllDebugLogging)
-                {
-                    Debug.Log(
-                        $"[AprilTag]   Stability confidence: {stabilityConfidence:F3}, confidence after: {confidence:F3}"
-                    );
-                }
+            if (m_enableAllDebugLogging)
+            {
+                Debug.Log(
+                    $"[Controller]   Stability confidence: {stabilityConfidence:F3}, confidence after: {confidence:F3}"
+                );
             }
         }
 
@@ -1636,74 +1618,6 @@ public class AprilTagController : MonoBehaviour
                     $"[AprilTag] Confidence clamped to minimum 0.1f for tag {tag.ID} (was {confidence:F3})"
                 );
             }
-        }
-
-        return finalConfidence;
-    }
-
-    /// <summary>
-    /// Calculate validation confidence based on detection history
-    /// </summary>
-    private float CalculateValidationConfidence(Queue<TagDetectionHistory> history)
-    {
-        if (history.Count < 2)
-            return m_singleDetectionConfidence; // Confidence for single detections
-
-        // PERFORMANCE: Avoid LINQ allocation - iterate queue directly using reusable buffer
-        if (
-            m_recentDetectionsBuffer == null
-            || m_recentDetectionsBuffer.Length < m_validationFrameCount
-        )
-        {
-            m_recentDetectionsBuffer = new TagDetectionHistory[m_validationFrameCount];
-        }
-
-        int count = 0;
-        foreach (var detection in history)
-        {
-            if (count >= m_validationFrameCount)
-                break;
-            m_recentDetectionsBuffer[count++] = detection;
-        }
-
-        if (count < 2)
-            return m_singleDetectionConfidence;
-
-        // Calculate position consistency
-        var positionVariance = 0f;
-        var rotationVariance = 0f;
-
-        for (var i = 1; i < count; i++)
-        {
-            positionVariance += Vector3.Distance(
-                m_recentDetectionsBuffer[i].Position,
-                m_recentDetectionsBuffer[i - 1].Position
-            );
-            rotationVariance += Quaternion.Angle(
-                m_recentDetectionsBuffer[i].Rotation,
-                m_recentDetectionsBuffer[i - 1].Rotation
-            );
-        }
-
-        positionVariance /= count - 1;
-        rotationVariance /= count - 1;
-
-        // Convert variance to confidence (lower variance = higher confidence)
-        var positionConfidence = Mathf.Clamp01(1.0f - positionVariance / m_maxPositionDeviation);
-        var rotationConfidence = Mathf.Clamp01(1.0f - rotationVariance / m_maxRotationDeviation);
-
-        var finalConfidence = (positionConfidence + rotationConfidence) * 0.5f;
-
-        if (m_enableAllDebugLogging)
-        {
-            Debug.Log($"[AprilTag] Validation confidence calculation:");
-            Debug.Log(
-                $"[AprilTag]   Position variance: {positionVariance:F3}m, max: {m_maxPositionDeviation:F3}m, confidence: {positionConfidence:F3}"
-            );
-            Debug.Log(
-                $"[AprilTag]   Rotation variance: {rotationVariance:F1}°, max: {m_maxRotationDeviation:F1}°, confidence: {rotationConfidence:F3}"
-            );
-            Debug.Log($"[AprilTag]   Final validation confidence: {finalConfidence:F3}");
         }
 
         return finalConfidence;
@@ -1899,281 +1813,6 @@ public class AprilTagController : MonoBehaviour
         {
             LogCurrentSettings();
         }
-    }
-
-    // PhotonVision-inspired pose filtering implementation
-    // Based on PhotonVision's temporal filtering approach for stable pose estimation
-    /// USAGE: REFERENCED in pose/visualization pipeline. Keep. (Temporal smoothing)
-    private Vector3 FilterTagPosition(
-        Vector3 rawPosition,
-        Vector3 previousPosition,
-        float deltaTime,
-        bool isInitialized
-    )
-    {
-        if (!m_enablePoseSmoothing || !isInitialized)
-        {
-            return rawPosition;
-        }
-
-        // Exponential smoothing filter similar to PhotonVision's approach
-        // Uses time-based smoothing factor for frame-rate independence
-        var smoothingFactor = Mathf.Exp(-deltaTime / m_positionSmoothingTime);
-
-        // Clamp smoothing factor to prevent instability
-        smoothingFactor = Mathf.Clamp01(smoothingFactor);
-
-        // Apply exponential smoothing
-        var filteredPosition = Vector3.Lerp(rawPosition, previousPosition, smoothingFactor);
-
-        if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
-        {
-            Debug.Log(
-                $"[AprilTag] Position Filter - Raw: {rawPosition:F3}, Filtered: {filteredPosition:F3}, Factor: {smoothingFactor:F3}"
-            );
-        }
-
-        return filteredPosition;
-    }
-
-    /// USAGE: REFERENCED in pose/visualization pipeline. Keep. (Temporal smoothing)
-    private Quaternion FilterTagRotation(
-        Quaternion rawRotation,
-        Quaternion previousRotation,
-        float deltaTime,
-        bool isInitialized
-    )
-    {
-        if (!m_enablePoseSmoothing || !isInitialized)
-        {
-            return rawRotation;
-        }
-
-        // Spherical linear interpolation for rotation smoothing
-        // Similar to PhotonVision's rotation filtering approach
-        var smoothingFactor = Mathf.Exp(-deltaTime / m_rotationSmoothingTime);
-        smoothingFactor = Mathf.Clamp01(smoothingFactor);
-
-        // Use Slerp for smooth rotation interpolation
-        var filteredRotation = Quaternion.Slerp(rawRotation, previousRotation, smoothingFactor);
-
-        return filteredRotation;
-    }
-
-    // PhotonVision-inspired multi-frame validation
-    // Validates detections against recent history to reject outliers
-    /// USAGE: REFERENCED in pose/visualization pipeline. Keep. (Validation gate)
-    private bool ValidateTagDetection(
-        int tagId,
-        Vector3 position,
-        Quaternion rotation,
-        float cornerQuality
-    )
-    {
-        if (!m_enableMultiFrameValidation)
-        {
-            return true;
-        }
-
-        // Initialize history queue if needed
-        if (!m_detectionHistory.ContainsKey(tagId))
-        {
-            m_detectionHistory[tagId] = new Queue<TagDetectionHistory>();
-        }
-
-        var history = m_detectionHistory[tagId];
-
-        // If we don't have enough history, accept the detection
-        if (history.Count < 2)
-        {
-            history.Enqueue(new TagDetectionHistory(position, rotation, cornerQuality));
-
-            // Limit history size (PhotonVision approach)
-            while (history.Count > m_validationFrameCount)
-            {
-                _ = history.Dequeue();
-            }
-
-            return true;
-        }
-
-        // Calculate average position and rotation from recent history
-        var avgPosition = Vector3.zero;
-        var avgEulerAngles = Vector3.zero;
-        var validCount = 0;
-
-        foreach (var detection in history)
-        {
-            if (
-                detection.IsValid
-                && (Time.time - detection.Timestamp) < m_validationRecentDetectionTime
-            ) // Only use recent detections
-            {
-                avgPosition += detection.Position;
-                avgEulerAngles += detection.Rotation.eulerAngles;
-                validCount++;
-            }
-        }
-
-        if (validCount == 0)
-        {
-            return true; // No valid history, accept detection
-        }
-
-        avgPosition /= validCount;
-        avgEulerAngles /= validCount;
-
-        // Check position deviation (PhotonVision's consistency check approach)
-        var positionDeviation = Vector3.Distance(position, avgPosition);
-        if (positionDeviation > m_maxPositionDeviation)
-        {
-            if (m_enableAllDebugLogging)
-            {
-                Debug.LogWarning(
-                    $"[AprilTag] Tag {tagId} rejected - Position deviation: {positionDeviation:F3}m > {m_maxPositionDeviation:F3}m"
-                );
-            }
-            return false;
-        }
-
-        // Check rotation deviation
-        var currentEuler = rotation.eulerAngles;
-        var rotationDeviation = Mathf.Max(
-            Mathf.Abs(Mathf.DeltaAngle(currentEuler.x, avgEulerAngles.x)),
-            Mathf.Abs(Mathf.DeltaAngle(currentEuler.y, avgEulerAngles.y)),
-            Mathf.Abs(Mathf.DeltaAngle(currentEuler.z, avgEulerAngles.z))
-        );
-
-        if (rotationDeviation > m_maxRotationDeviation)
-        {
-            if (m_enableAllDebugLogging)
-            {
-                Debug.LogWarning(
-                    $"[AprilTag] Tag {tagId} rejected - Rotation deviation: {rotationDeviation:F1}° > {m_maxRotationDeviation:F1}°"
-                );
-            }
-            return false;
-        }
-
-        // Detection passed validation, add to history
-        history.Enqueue(new TagDetectionHistory(position, rotation, cornerQuality));
-
-        // Limit history size
-        while (history.Count > m_validationFrameCount)
-        {
-            _ = history.Dequeue();
-        }
-
-        return true;
-    }
-
-    // PhotonVision-inspired corner quality assessment
-    // Analyzes corner sharpness and geometric consistency
-    /// USAGE: REFERENCED in pose/visualization pipeline. Keep. (Quality metric)
-    private float CalculateCornerQuality(Vector2[] corners)
-    {
-        if (!m_enableCornerQualityAssessment || corners == null || corners.Length != 4)
-        {
-            return 1.0f; // Default quality if assessment disabled
-        }
-
-        var quality = 1.0f;
-
-        // Check geometric consistency (PhotonVision approach)
-        // Measure how close the corners are to forming a proper quadrilateral
-
-        // Calculate side lengths
-        var sideLengths = new float[4];
-        for (var i = 0; i < 4; i++)
-        {
-            var nextIndex = (i + 1) % 4;
-            sideLengths[i] = Vector2.Distance(corners[i], corners[nextIndex]);
-        }
-
-        // Check for degenerate cases (very small or very large sides)
-        var minSide = Mathf.Min(sideLengths);
-        var maxSide = Mathf.Max(sideLengths);
-
-        if (minSide < m_minCornerSideLength) // Too small in pixels
-        {
-            quality *= m_smallTagQualityPenalty;
-        }
-
-        if (maxSide > m_maxCornerSideLength) // Too large, likely false detection
-        {
-            quality *= m_largeTagQualityPenalty;
-        }
-
-        // Check aspect ratio consistency (should be roughly square for AprilTags)
-        var aspectRatio = maxSide / Mathf.Max(minSide, 0.1f);
-        if (aspectRatio > m_maxAspectRatio) // Too elongated
-        {
-            quality *= m_elongatedTagQualityPenalty;
-        }
-
-        // Check corner angles (should be close to 90 degrees for AprilTags)
-        var totalAngleDeviation = 0f;
-        for (var i = 0; i < 4; i++)
-        {
-            var prev = corners[(i + 3) % 4];
-            var curr = corners[i];
-            var next = corners[(i + 1) % 4];
-
-            var v1 = (prev - curr).normalized;
-            var v2 = (next - curr).normalized;
-
-            var angle = Vector2.Angle(v1, v2);
-            var angleDeviation = Mathf.Abs(angle - 90f);
-            totalAngleDeviation += angleDeviation;
-        }
-
-        var avgAngleDeviation = totalAngleDeviation / 4f;
-        if (avgAngleDeviation > m_maxCornerAngleDeviation) // Corners too far from 90 degrees
-        {
-            quality *= Mathf.Lerp(
-                1.0f,
-                0.2f,
-                (avgAngleDeviation - m_maxCornerAngleDeviation) / (m_maxCornerAngleDeviation * 2f)
-            );
-        }
-
-        // Check for convexity (corners should form a convex quadrilateral)
-        var isConvex = true;
-        for (var i = 0; i < 4; i++)
-        {
-            var p1 = corners[i];
-            var p2 = corners[(i + 1) % 4];
-            var p3 = corners[(i + 2) % 4];
-
-            // Cross product to check turn direction
-            var cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
-            if (i == 0)
-            {
-                // Set expected sign
-            }
-            else if ((cross > 0) != (i % 2 == 1))
-            {
-                isConvex = false;
-                break;
-            }
-        }
-
-        if (!isConvex)
-        {
-            quality *= m_nonConvexQualityPenalty;
-        }
-
-        // Clamp quality to valid range
-        quality = Mathf.Clamp01(quality);
-
-        if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
-        {
-            Debug.Log(
-                $"[AprilTag] Corner Quality Assessment - Quality: {quality:F3}, AspectRatio: {aspectRatio:F2}, AngleDeviation: {avgAngleDeviation:F1}°, Convex: {isConvex}"
-            );
-        }
-
-        return quality;
     }
 
     private void SaveRuntimeOffset()

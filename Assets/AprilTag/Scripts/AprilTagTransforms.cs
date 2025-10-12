@@ -1323,4 +1323,90 @@ public class AprilTagTransforms : MonoBehaviour
         // Fallback to tag rotation if no camera reference
         return tag.Rotation * Quaternion.Euler(m_rotationOffset);
     }
+
+    /// <summary>
+    /// Calculate corner quality for a detected tag
+    /// Analyzes geometric consistency to detect false positives
+    /// </summary>
+    public float CalculateCornerQuality(
+        Vector2[] corners,
+        float minSideLength,
+        float maxSideLength,
+        float maxAspectRatio,
+        float maxAngleDeviation,
+        float smallTagPenalty,
+        float largeTagPenalty,
+        float elongatedPenalty,
+        float nonConvexPenalty
+    )
+    {
+        if (corners == null || corners.Length != 4)
+            return 1.0f;
+
+        var quality = 1.0f;
+
+        // Calculate side lengths
+        var sideLengths = new float[4];
+        for (var i = 0; i < 4; i++)
+        {
+            var nextIndex = (i + 1) % 4;
+            sideLengths[i] = Vector2.Distance(corners[i], corners[nextIndex]);
+        }
+
+        var minSide = Mathf.Min(sideLengths);
+        var maxSide = Mathf.Max(sideLengths);
+
+        // Check for degenerate cases
+        if (minSide < minSideLength)
+            quality *= smallTagPenalty;
+        if (maxSide > maxSideLength)
+            quality *= largeTagPenalty;
+
+        // Check aspect ratio
+        var aspectRatio = maxSide / Mathf.Max(minSide, 0.1f);
+        if (aspectRatio > maxAspectRatio)
+            quality *= elongatedPenalty;
+
+        // Check corner angles
+        var totalAngleDeviation = 0f;
+        for (var i = 0; i < 4; i++)
+        {
+            var prev = corners[(i + 3) % 4];
+            var curr = corners[i];
+            var next = corners[(i + 1) % 4];
+
+            var v1 = (prev - curr).normalized;
+            var v2 = (next - curr).normalized;
+
+            var angle = Vector2.Angle(v1, v2);
+            totalAngleDeviation += Mathf.Abs(angle - 90f);
+        }
+
+        var avgAngleDeviation = totalAngleDeviation / 4f;
+        if (avgAngleDeviation > maxAngleDeviation)
+        {
+            quality *= Mathf.Lerp(1.0f, 0.2f, (avgAngleDeviation - maxAngleDeviation) / (maxAngleDeviation * 2f));
+        }
+
+        // Check for convexity
+        var isConvex = true;
+        for (var i = 0; i < 4; i++)
+        {
+            var p1 = corners[i];
+            var p2 = corners[(i + 1) % 4];
+            var p3 = corners[(i + 2) % 4];
+
+            var cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+            if (i > 0 && (cross > 0) != (i % 2 == 1))
+            {
+                isConvex = false;
+                break;
+            }
+        }
+
+        if (!isConvex)
+            quality *= nonConvexPenalty;
+
+        return Mathf.Clamp01(quality);
+    }
 }
