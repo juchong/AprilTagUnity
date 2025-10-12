@@ -413,7 +413,6 @@ public class AprilTagController : MonoBehaviour
 
     // Async detection state (using coroutine pattern)
     private bool m_detectionInProgress = false;
-    private Color32[] m_detectionPixelsCopy = null; // Copy for async processing
     private System.Collections.IEnumerator m_detectionCoroutine = null;
 
     // Shared transforms helper (single source of truth for transform math)
@@ -481,6 +480,15 @@ public class AprilTagController : MonoBehaviour
 
     // Filtered poses for smoothing (PhotonVision approach)
     private readonly Dictionary<int, FilteredTagPose> m_filteredPoses = new();
+
+    // Track when visualizations were last active (for cleanup)
+    private readonly Dictionary<int, float> m_vizLastActiveTime = new();
+
+    // PERFORMANCE: Reusable buffers to avoid allocations per frame
+    private readonly HashSet<int> m_seenTagsBuffer = new();
+    private readonly HashSet<int> m_currentTagIdsBuffer = new();
+    private readonly List<int> m_tagsToRemoveBuffer = new();
+    private TagDetectionHistory[] m_recentDetectionsBuffer; // Allocated on first use
 
     private void OnDisable() => DisposeDetector();
 
@@ -1032,7 +1040,8 @@ public class AprilTagController : MonoBehaviour
         }
 
         // Visualize detected tags using corner-based positioning
-        var seen = new HashSet<int>();
+        // PERFORMANCE: Reuse buffer instead of allocating new HashSet each frame
+        m_seenTagsBuffer.Clear();
         var detectedCount = 0;
 
         // Try to get raw detection data for corner-based positioning
@@ -1058,7 +1067,7 @@ public class AprilTagController : MonoBehaviour
         foreach (var t in m_detector.DetectedTags)
         {
             detectedCount++;
-            _ = seen.Add(t.ID);
+            m_seenTagsBuffer.Add(t.ID);
 
             // Try to find corresponding raw detection data for corner coordinates
             Vector2? cornerCenter = null;
@@ -1331,6 +1340,9 @@ public class AprilTagController : MonoBehaviour
             if (m_scaleVizToTagSize)
                 tr.localScale = Vector3.one * m_tagSizeMeters * m_visualizationScaleMultiplier;
             tr.gameObject.SetActive(true);
+
+            // Track when this visualization was last active
+            m_vizLastActiveTime[t.ID] = Time.time;
         }
 
         // Log detection results only when tag count changes
@@ -1351,12 +1363,74 @@ public class AprilTagController : MonoBehaviour
 
         // PERFORMANCE FIX: Only process spatial anchors when detection runs (not every frame)
         // This was being called at 72-90 FPS but should only run at detection rate (15-30 FPS)
-        ProcessSpatialAnchors(seen);
+        ProcessSpatialAnchors(m_seenTagsBuffer);
 
         // Hide those not seen this frame
         foreach (var kv in m_vizById)
-            if (!seen.Contains(kv.Key) && kv.Value)
+            if (!m_seenTagsBuffer.Contains(kv.Key) && kv.Value)
                 kv.Value.gameObject.SetActive(false);
+
+        // MEMORY LEAK FIX: Periodically clean up old visualizations that haven't been seen
+        // This prevents m_vizById from growing indefinitely as different tags are detected over time
+        if (Time.frameCount % 900 == 0) // Every ~12 seconds at 72 FPS
+        {
+            CleanupOldVisualizations(m_seenTagsBuffer);
+        }
+    }
+
+    /// <summary>
+    /// Clean up visualizations for tags that haven't been detected recently
+    /// Prevents memory leaks from m_vizById dictionary growing indefinitely
+    /// </summary>
+    private void CleanupOldVisualizations(HashSet<int> currentlySeenTags)
+    {
+        const float InactiveTimeoutSeconds = 30f; // Only destroy after 30 seconds of inactivity
+        // PERFORMANCE: Reuse buffer instead of allocating new List
+        m_tagsToRemoveBuffer.Clear();
+
+        foreach (var kv in m_vizById)
+        {
+            // If visualization exists but tag not currently detected AND not an anchor
+            if (kv.Value != null && !currentlySeenTags.Contains(kv.Key))
+            {
+                // Check if this tag has an anchor (if so, keep visualization)
+                if (
+                    m_spatialAnchorManager != null
+                    && m_spatialAnchorManager.GetAnchorForTag(kv.Key) != null
+                )
+                {
+                    continue; // Keep visualization for anchored tags
+                }
+
+                // Check how long visualization has been inactive
+                if (m_vizLastActiveTime.TryGetValue(kv.Key, out float lastActiveTime))
+                {
+                    float inactiveTime = Time.time - lastActiveTime;
+
+                    // Only destroy if inactive for timeout period
+                    if (inactiveTime > InactiveTimeoutSeconds && !kv.Value.gameObject.activeSelf)
+                    {
+                        // Destroy and mark for removal
+                        Destroy(kv.Value.gameObject);
+                        m_tagsToRemoveBuffer.Add(kv.Key);
+                    }
+                }
+            }
+        }
+
+        // Remove from dictionaries
+        foreach (var tagId in m_tagsToRemoveBuffer)
+        {
+            m_vizById.Remove(tagId);
+            m_vizLastActiveTime.Remove(tagId);
+        }
+
+        if (m_tagsToRemoveBuffer.Count > 0 && m_enableAllDebugLogging)
+        {
+            Debug.Log(
+                $"[AprilTag] Cleaned up {m_tagsToRemoveBuffer.Count} old visualizations. Remaining: {m_vizById.Count}"
+            );
+        }
     }
 
     /// <summary>
@@ -1431,18 +1505,25 @@ public class AprilTagController : MonoBehaviour
         }
 
         // PERFORMANCE: Remove tracking for tags that are no longer detected
-        // Build set of current tag IDs without LINQ
-        var currentTagIds = new HashSet<int>();
+        // Reuse buffer instead of allocating new HashSet
+        m_currentTagIdsBuffer.Clear();
         foreach (var tag in m_detector.DetectedTags)
         {
-            currentTagIds.Add(tag.ID);
+            m_currentTagIdsBuffer.Add(tag.ID);
         }
 
+        // Clean up filtered poses for tags no longer detected
         foreach (var tagId in m_filteredPoses.Keys.ToArray()) // ToArray() to avoid modification during iteration
         {
-            if (!currentTagIds.Contains(tagId))
+            if (!m_currentTagIdsBuffer.Contains(tagId))
             {
                 m_spatialAnchorManager.RemoveTagTracking(tagId);
+
+                // MEMORY LEAK FIX: Remove from filtered poses dictionary
+                m_filteredPoses.Remove(tagId);
+
+                // MEMORY LEAK FIX: Remove from detection history dictionary
+                m_detectionHistory.Remove(tagId);
             }
         }
     }
@@ -1535,28 +1616,44 @@ public class AprilTagController : MonoBehaviour
         if (history.Count < 2)
             return m_singleDetectionConfidence; // Confidence for single detections
 
-        var recentDetections = history.Take(m_validationFrameCount).ToList();
-        if (recentDetections.Count < 2)
+        // PERFORMANCE: Avoid LINQ allocation - iterate queue directly using reusable buffer
+        if (
+            m_recentDetectionsBuffer == null
+            || m_recentDetectionsBuffer.Length < m_validationFrameCount
+        )
+        {
+            m_recentDetectionsBuffer = new TagDetectionHistory[m_validationFrameCount];
+        }
+
+        int count = 0;
+        foreach (var detection in history)
+        {
+            if (count >= m_validationFrameCount)
+                break;
+            m_recentDetectionsBuffer[count++] = detection;
+        }
+
+        if (count < 2)
             return m_singleDetectionConfidence;
 
         // Calculate position consistency
         var positionVariance = 0f;
         var rotationVariance = 0f;
 
-        for (var i = 1; i < recentDetections.Count; i++)
+        for (var i = 1; i < count; i++)
         {
             positionVariance += Vector3.Distance(
-                recentDetections[i].Position,
-                recentDetections[i - 1].Position
+                m_recentDetectionsBuffer[i].Position,
+                m_recentDetectionsBuffer[i - 1].Position
             );
             rotationVariance += Quaternion.Angle(
-                recentDetections[i].Rotation,
-                recentDetections[i - 1].Rotation
+                m_recentDetectionsBuffer[i].Rotation,
+                m_recentDetectionsBuffer[i - 1].Rotation
             );
         }
 
-        positionVariance /= recentDetections.Count - 1;
-        rotationVariance /= recentDetections.Count - 1;
+        positionVariance /= count - 1;
+        rotationVariance /= count - 1;
 
         // Convert variance to confidence (lower variance = higher confidence)
         var positionConfidence = Mathf.Clamp01(1.0f - positionVariance / m_maxPositionDeviation);
@@ -2475,29 +2572,18 @@ public class AprilTagController : MonoBehaviour
     {
         m_detectionInProgress = true;
 
-        // Copy pixel data (main thread operation)
-        if (m_detectionPixelsCopy == null || m_detectionPixelsCopy.Length != pixels.Length)
-        {
-            m_detectionPixelsCopy = new Color32[pixels.Length];
-        }
-        System.Array.Copy(pixels, m_detectionPixelsCopy, pixels.Length);
-
         // Yield to next frame before heavy processing
+        // This allows Unity to render current frame before we do expensive detection
         yield return null;
 
-        // Run detection on main thread but yielding periodically
-        // This prevents a single-frame spike while still processing
+        // Run detection on main thread (no copy needed - we're already on main thread)
         try
         {
             if (m_detector != null)
             {
-                // NOTE: Native library still runs on main thread, but we can yield
-                // This allows Unity to maintain frame rate by spreading work
-                m_detector.ProcessImage(
-                    m_detectionPixelsCopy.AsSpan(),
-                    m_horizontalFovDeg,
-                    m_tagSizeMeters
-                );
+                // PERFORMANCE: No Array.Copy needed - pixels array is already on heap
+                // and won't be modified until next detection cycle
+                m_detector.ProcessImage(pixels.AsSpan(), m_horizontalFovDeg, m_tagSizeMeters);
             }
         }
         catch (System.Exception ex)
