@@ -15,15 +15,22 @@ namespace AprilTag
     /// - Grab/move/rotate anchors with trigger
     /// - Delete anchors in view with B button
     /// - Clear all anchors with thumbstick button
+    /// - Auto-setup on Start (finds required components automatically)
     /// </summary>
+    [AddComponentMenu("AprilTag/AprilTag Anchor Interaction")]
     public class AprilTagAnchorInteraction : MonoBehaviour
     {
+        [Header("Auto-Setup")]
+        [Tooltip("Automatically find required components on Start")]
+        [SerializeField]
+        private bool m_autoSetup = true;
+
         [Header("References")]
-        [Tooltip("Spatial anchor manager to interface with")]
+        [Tooltip("Spatial anchor manager to interface with (auto-found if null)")]
         [SerializeField]
         private AprilTagSpatialAnchorManager m_spatialAnchorManager;
 
-        [Tooltip("AprilTag controller for debug logging")]
+        [Tooltip("AprilTag controller for debug logging (auto-found if null)")]
         [SerializeField]
         private AprilTagController m_aprilTagController;
 
@@ -113,6 +120,22 @@ namespace AprilTag
 
         private void Start()
         {
+            if (m_autoSetup)
+            {
+                SetupComponents();
+            }
+
+            if (EnableDebugLogging)
+            {
+                Debug.Log("[AnchorInteraction] Initialized - Ready for anchor manipulation");
+            }
+        }
+
+        /// <summary>
+        /// Auto-setup: Find all required components and initialize
+        /// </summary>
+        private void SetupComponents()
+        {
             // Auto-find references if not assigned
             if (m_spatialAnchorManager == null)
             {
@@ -120,7 +143,7 @@ namespace AprilTag
                 if (m_spatialAnchorManager == null)
                 {
                     Debug.LogError(
-                        "[AprilTagAnchorInteraction] No AprilTagSpatialAnchorManager found in scene!"
+                        "[AnchorInteraction] No AprilTagSpatialAnchorManager found in scene!"
                     );
                     enabled = false;
                     return;
@@ -140,13 +163,16 @@ namespace AprilTag
             {
                 CreateRayVisualizers();
             }
+        }
 
-            if (EnableDebugLogging)
-            {
-                Debug.Log(
-                    "[AprilTagAnchorInteraction] Initialized - Ready for anchor manipulation"
-                );
-            }
+        /// <summary>
+        /// Context menu command to manually trigger setup
+        /// </summary>
+        [ContextMenu("Setup Anchor Interaction")]
+        private void SetupNow()
+        {
+            SetupComponents();
+            Debug.Log("[AnchorInteraction] Manual setup complete");
         }
 
         private void FindControllerTransforms()
@@ -161,14 +187,14 @@ namespace AprilTag
                 if (EnableDebugLogging)
                 {
                     Debug.Log(
-                        $"[AprilTagAnchorInteraction] Found controller transforms - Left: {m_leftControllerTransform != null}, Right: {m_rightControllerTransform != null}"
+                        $"[AnchorInteraction] Found controller transforms - Left: {m_leftControllerTransform != null}, Right: {m_rightControllerTransform != null}"
                     );
                 }
             }
             else
             {
                 Debug.LogWarning(
-                    "[AprilTagAnchorInteraction] OVRCameraRig not found - controller tracking may not work properly"
+                    "[AnchorInteraction] OVRCameraRig not found - controller tracking may not work properly"
                 );
             }
         }
@@ -433,7 +459,7 @@ namespace AprilTag
             if (EnableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagAnchorInteraction] Grabbed anchor for tag {m_grabbedTagId} at {m_grabbedAnchorTransform.position}"
+                    $"[AnchorInteraction] Grabbed anchor for tag {m_grabbedTagId} at {m_grabbedAnchorTransform.position}"
                 );
             }
 
@@ -492,7 +518,7 @@ namespace AprilTag
             if (EnableDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagAnchorInteraction] Releasing anchor for tag {m_grabbedTagId} at {finalPosition}, rotation {finalRotation.eulerAngles}"
+                    $"[AnchorInteraction] Releasing anchor for tag {m_grabbedTagId} at {finalPosition}, rotation {finalRotation.eulerAngles}"
                 );
             }
 
@@ -508,7 +534,7 @@ namespace AprilTag
                     if (EnableDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagAnchorInteraction] Successfully saved anchor for tag {m_grabbedTagId} to Meta storage at position {finalPosition}"
+                            $"[AnchorInteraction] Successfully saved anchor for tag {m_grabbedTagId} to Meta storage at position {finalPosition}"
                         );
                     }
 
@@ -521,15 +547,13 @@ namespace AprilTag
                 else
                 {
                     Debug.LogError(
-                        $"[AprilTagAnchorInteraction] Failed to save anchor for tag {m_grabbedTagId} to Meta storage: {saveResult.Status}"
+                        $"[AnchorInteraction] Failed to save anchor for tag {m_grabbedTagId} to Meta storage: {saveResult.Status}"
                     );
                 }
             }
             catch (System.Exception ex)
             {
-                Debug.LogError(
-                    $"[AprilTagAnchorInteraction] Exception saving anchor: {ex.Message}"
-                );
+                Debug.LogError($"[AnchorInteraction] Exception saving anchor: {ex.Message}");
             }
 
             // Haptic feedback
@@ -585,9 +609,7 @@ namespace AprilTag
 
             if (anchorsInView.Count > 0)
             {
-                Debug.Log(
-                    $"[AprilTagAnchorInteraction] Clearing {anchorsInView.Count} anchors in view"
-                );
+                Debug.Log($"[AnchorInteraction] Clearing {anchorsInView.Count} anchors in view");
 
                 foreach (var anchor in anchorsInView)
                 {
@@ -599,7 +621,7 @@ namespace AprilTag
             }
             else
             {
-                Debug.Log("[AprilTagAnchorInteraction] No anchors in view to clear");
+                Debug.Log("[AnchorInteraction] No anchors in view to clear");
             }
         }
 
@@ -608,7 +630,7 @@ namespace AprilTag
             if (m_spatialAnchorManager == null)
                 return;
 
-            Debug.Log("[AprilTagAnchorInteraction] Clearing ALL anchors");
+            Debug.Log("[AnchorInteraction] Clearing ALL anchors");
 
             m_spatialAnchorManager.EraseAllAnchors();
 

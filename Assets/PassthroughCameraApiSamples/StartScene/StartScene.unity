@@ -367,7 +367,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_webcamPipeline: {fileID: 0}
   m_visualizationHelper: {fileID: 0}
-  m_webCamManager: {fileID: 202549745}
+  m_webCamManager: {fileID: 0}
   m_webCamTextureOverride: {fileID: 0}
   m_tagVizPrefab: {fileID: 0}
   m_scaleVizToTagSize: 1
@@ -377,7 +377,8 @@ MonoBehaviour:
   m_saveRuntimeOffset: 1
   m_rotationOffset: {x: 0, y: 0, z: 0}
   m_usePassthroughRaycasting: 1
-  m_environmentRaycastManager: {fileID: 720625301}
+  m_environmentRaycastManager: {fileID: 0}
+  m_autoCreateRaycastManager: 1
   m_positionScaleFactor: 1
   m_minDetectionDistance: 0.3
   m_maxDetectionDistance: 15
@@ -394,6 +395,8 @@ MonoBehaviour:
   m_enablePositionOffset: 1
   m_enableRotationOffset: 1
   m_enableAllDebugLogging: 0
+  m_logInterval: 60
+  m_verboseLogInterval: 300
   m_enableConfigurationTool: 0
   m_enableGPUPreprocessing: 1
   m_gpuPreprocessingSettings:
@@ -419,9 +422,6 @@ MonoBehaviour:
   m_gpuMaxImageHeight: 1280
   m_preprocessorShaderPath: AprilTagPreprocessor
   m_histogramShaderPath: AprilTagHistogram
-  m_debugLogInterval: 60
-  m_verboseDebugLogInterval: 100
-  m_cornerQualityLogInterval: 180
   m_enablePoseSmoothing: 1
   m_positionSmoothingTime: 0.05
   m_rotationSmoothingTime: 0.1
@@ -1128,68 +1128,6 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1160112662}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &202549745
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 202549748}
-  - component: {fileID: 202549746}
-  - component: {fileID: 202549747}
-  m_Layer: 0
-  m_Name: WebCamTextureManager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &202549746
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 202549745}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ef9a7893e57c04c0db4114c70954b915, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  Eye: 0
-  RequestedResolution: {x: 0, y: 0}
-  CameraPermissions: {fileID: 0}
---- !u!114 &202549747
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 202549745}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6f5e9631f3cd04da0acc02bc5b51f5d4, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  PermissionRequestsOnStartup:
-  - com.oculus.permission.USE_SCENE
---- !u!4 &202549748
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 202549745}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &213524144
 GameObject:
@@ -3812,97 +3750,6 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 903877240}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &707895999
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 707896001}
-  - component: {fileID: 707896000}
-  m_Layer: 0
-  m_Name: AprilTagPermissionsManager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &707896000
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 707895999}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 84028321f3aed8243bc134ef28ad6f5f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  requestPermissionsOnStart: 1
-  m_retryOnDenial: 1
-  m_retryDelaySeconds: 2
---- !u!4 &707896001
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 707895999}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &720625300
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 720625302}
-  - component: {fileID: 720625301}
-  m_Layer: 0
-  m_Name: EnvironmentRaycastManager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &720625301
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 720625300}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2d8affdff7ba47d892cc734baac9ac71, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
---- !u!4 &720625302
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 720625300}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &732071651
 GameObject:
@@ -6765,6 +6612,20 @@ MonoBehaviour:
   m_spatialAnchorLoader: {fileID: 0}
   m_spatialAnchorCore: {fileID: 0}
   m_enableKeepOutZone: 1
+  m_enableAnchorInteraction: 1
+  m_interactionHand: 1
+  m_interactionRayDistance: 10
+  m_interactionGrabDistance: 0.5
+  m_interactionEnableRotation: 1
+  m_interactionRotationSpeed: 90
+  m_interactionMovementDamping: 10
+  m_interactionShowRay: 1
+  m_interactionRayColor: {r: 1, g: 1, b: 1, a: 0.3}
+  m_interactionRayWidth: 0.005
+  m_interactionHighlightColor: {r: 1, g: 1, b: 0, a: 0.5}
+  m_interactionGrabColor: {r: 0, g: 1, b: 0, a: 0.5}
+  m_enableDebugLogging: 0
+  m_logInterval: 300
 --- !u!4 &1220006293
 Transform:
   m_ObjectHideFlags: 0
@@ -7485,56 +7346,6 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!1 &1393492502
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1393492504}
-  - component: {fileID: 1393492503}
-  m_Layer: 0
-  m_Name: AprilTagInteraction
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1393492503
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1393492502}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a39a9d2e5a984d0468d9a5d0b97d24e1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::AprilTag.AprilTagAnchorInteractionSetup
-  m_autoSetup: 1
-  m_targetObject: {fileID: 0}
-  m_activeHand: 1
-  m_maxRayDistance: 10
-  m_enableRotationControl: 1
-  m_showRayVisual: 1
---- !u!4 &1393492504
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1393492502}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1394149496
 GameObject:
   m_ObjectHideFlags: 0
@@ -11945,12 +11756,8 @@ SceneRoots:
   - {fileID: 1305661474}
   - {fileID: 772595111}
   - {fileID: 116047286}
-  - {fileID: 707896001}
-  - {fileID: 202549748}
   - {fileID: 92805405}
   - {fileID: 1220006293}
-  - {fileID: 720625302}
-  - {fileID: 1393492504}
+  - {fileID: 370915504}
   - {fileID: 1619708785}
   - {fileID: 213524149}
-  - {fileID: 370915504}

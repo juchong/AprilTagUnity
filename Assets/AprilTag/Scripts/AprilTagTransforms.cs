@@ -97,7 +97,7 @@ public class AprilTagTransforms : MonoBehaviour
         catch (Exception e)
         {
             Debug.LogWarning(
-                $"[AprilTagTransforms] Error extracting corner center for tag {tagId}: {e.Message}"
+                $"[Transforms] Error extracting corner center for tag {tagId}: {e.Message}"
             );
         }
 
@@ -167,7 +167,7 @@ public class AprilTagTransforms : MonoBehaviour
                         if (m_enableAllDebugLogging)
                         {
                             Debug.LogWarning(
-                                $"[AprilTagTransforms] Error getting {xField} field value: {e.Message}"
+                                $"[Transforms] Error getting {xField} field value: {e.Message}"
                             );
                         }
                     }
@@ -188,7 +188,7 @@ public class AprilTagTransforms : MonoBehaviour
                             if (m_enableAllDebugLogging)
                             {
                                 Debug.LogWarning(
-                                    $"[AprilTagTransforms] Error getting {xField} property value: {e.Message}"
+                                    $"[Transforms] Error getting {xField} property value: {e.Message}"
                                 );
                             }
                         }
@@ -209,7 +209,7 @@ public class AprilTagTransforms : MonoBehaviour
                         if (m_enableAllDebugLogging)
                         {
                             Debug.LogWarning(
-                                $"[AprilTagTransforms] Error getting {yField} field value: {e.Message}"
+                                $"[Transforms] Error getting {yField} field value: {e.Message}"
                             );
                         }
                     }
@@ -230,7 +230,7 @@ public class AprilTagTransforms : MonoBehaviour
                             if (m_enableAllDebugLogging)
                             {
                                 Debug.LogWarning(
-                                    $"[AprilTagTransforms] Error getting {yField} property value: {e.Message}"
+                                    $"[Transforms] Error getting {yField} property value: {e.Message}"
                                 );
                             }
                         }
@@ -310,7 +310,7 @@ public class AprilTagTransforms : MonoBehaviour
                             if (m_enableAllDebugLogging)
                             {
                                 Debug.LogWarning(
-                                    $"[AprilTagTransforms] Error with alternative fields {xField}, {yField}: {e.Message}"
+                                    $"[Transforms] Error with alternative fields {xField}, {yField}: {e.Message}"
                                 );
                             }
                         }
@@ -335,9 +335,7 @@ public class AprilTagTransforms : MonoBehaviour
         {
             if (m_enableAllDebugLogging)
             {
-                Debug.LogWarning(
-                    $"[AprilTagTransforms] Error extracting corner center: {e.Message}"
-                );
+                Debug.LogWarning($"[Transforms] Error extracting corner center: {e.Message}");
             }
         }
 
@@ -421,7 +419,7 @@ public class AprilTagTransforms : MonoBehaviour
                     if (m_enableAllDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagTransforms] Tag {tagPose.ID} raycast HIT at: {hitInfo.point}, distance: {raycastDistance:F3}m"
+                            $"[Transforms] Tag {tagPose.ID} raycast HIT at: {hitInfo.point}, distance: {raycastDistance:F3}m"
                         );
                     }
                     return hitInfo.point;
@@ -436,7 +434,7 @@ public class AprilTagTransforms : MonoBehaviour
                         if (m_enableAllDebugLogging)
                         {
                             Debug.Log(
-                                $"[AprilTagTransforms] Tag {tagPose.ID} raycast MISS, using last known distance: {lastDistance:F3}m -> {consistentPosition}"
+                                $"[Transforms] Tag {tagPose.ID} raycast MISS, using last known distance: {lastDistance:F3}m -> {consistentPosition}"
                             );
                         }
 
@@ -446,7 +444,7 @@ public class AprilTagTransforms : MonoBehaviour
                     if (m_enableAllDebugLogging)
                     {
                         Debug.LogWarning(
-                            $"[AprilTagTransforms] Tag {tagPose.ID} raycast MISS with no history, using tag distance fallback"
+                            $"[Transforms] Tag {tagPose.ID} raycast MISS with no history, using tag distance fallback"
                         );
                     }
                 }
@@ -474,7 +472,7 @@ public class AprilTagTransforms : MonoBehaviour
             if (m_enableAllDebugLogging)
             {
                 Debug.Log(
-                    $"[AprilTagTransforms] Tag {tagPose.ID} using tag distance fallback: {clampedDistance:F3}m -> {fallbackPosition}"
+                    $"[Transforms] Tag {tagPose.ID} using tag distance fallback: {clampedDistance:F3}m -> {fallbackPosition}"
                 );
             }
 
@@ -484,9 +482,7 @@ public class AprilTagTransforms : MonoBehaviour
         {
             if (m_enableAllDebugLogging)
             {
-                Debug.LogWarning(
-                    $"[AprilTagTransforms] Error in corner-based positioning: {e.Message}"
-                );
+                Debug.LogWarning($"[Transforms] Error in corner-based positioning: {e.Message}");
             }
 
             // Final fallback to 3D pose estimation
@@ -554,7 +550,7 @@ public class AprilTagTransforms : MonoBehaviour
                         if (m_enableAllDebugLogging)
                         {
                             Debug.LogWarning(
-                                $"[AprilTagTransforms] Error getting {xField} field value: {e.Message}"
+                                $"[Transforms] Error getting {xField} field value: {e.Message}"
                             );
                         }
                     }
@@ -575,7 +571,7 @@ public class AprilTagTransforms : MonoBehaviour
                             if (m_enableAllDebugLogging)
                             {
                                 Debug.LogWarning(
-                                    $"[AprilTagTransforms] Error getting {xField} property value: {e.Message}"
+                                    $"[Transforms] Error getting {xField} property value: {e.Message}"
                                 );
                             }
                         }
@@ -596,7 +592,7 @@ public class AprilTagTransforms : MonoBehaviour
                         if (m_enableAllDebugLogging)
                         {
                             Debug.LogWarning(
-                                $"[AprilTagTransforms] Error getting {yField} field value: {e.Message}"
+                                $"[Transforms] Error getting {yField} field value: {e.Message}"
                             );
                         }
                     }
@@ -617,7 +613,7 @@ public class AprilTagTransforms : MonoBehaviour
                             if (m_enableAllDebugLogging)
                             {
                                 Debug.LogWarning(
-                                    $"[AprilTagTransforms] Error getting {yField} property value: {e.Message}"
+                                    $"[Transforms] Error getting {yField} property value: {e.Message}"
                                 );
                             }
                         }
@@ -688,7 +684,7 @@ public class AprilTagTransforms : MonoBehaviour
                             if (m_enableAllDebugLogging)
                             {
                                 Debug.LogWarning(
-                                    $"[AprilTagTransforms] Error with alternative fields {xField}, {yField}: {e.Message}"
+                                    $"[Transforms] Error with alternative fields {xField}, {yField}: {e.Message}"
                                 );
                             }
                         }
@@ -713,9 +709,7 @@ public class AprilTagTransforms : MonoBehaviour
         {
             if (m_enableAllDebugLogging)
             {
-                Debug.LogWarning(
-                    $"[AprilTagTransforms] Error extracting corner center: {e.Message}"
-                );
+                Debug.LogWarning($"[Transforms] Error extracting corner center: {e.Message}");
             }
         }
 
@@ -792,7 +786,7 @@ public class AprilTagTransforms : MonoBehaviour
                     if (m_enableAllDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagTransforms] Corner-based rotation - Normal: {normal}, Cube Rotation: {cubeRotation.eulerAngles}"
+                            $"[Transforms] Corner-based rotation - Normal: {normal}, Cube Rotation: {cubeRotation.eulerAngles}"
                         );
                     }
 
@@ -803,7 +797,7 @@ public class AprilTagTransforms : MonoBehaviour
                     if (m_enableAllDebugLogging)
                     {
                         Debug.LogWarning(
-                            $"[AprilTagTransforms] Invalid normal vector from corners - v1: {v1}, v2: {v2}"
+                            $"[Transforms] Invalid normal vector from corners - v1: {v1}, v2: {v2}"
                         );
                     }
                 }
@@ -812,9 +806,7 @@ public class AprilTagTransforms : MonoBehaviour
             {
                 if (m_enableAllDebugLogging)
                 {
-                    Debug.LogWarning(
-                        $"[AprilTagTransforms] Invalid corner vectors - v1: {v1}, v2: {v2}"
-                    );
+                    Debug.LogWarning($"[Transforms] Invalid corner vectors - v1: {v1}, v2: {v2}");
                 }
             }
         }
@@ -864,7 +856,7 @@ public class AprilTagTransforms : MonoBehaviour
             if (m_enableAllDebugLogging)
             {
                 Debug.LogWarning(
-                    $"[AprilTagTransforms] Error calculating corner-based rotation: {e.Message}"
+                    $"[Transforms] Error calculating corner-based rotation: {e.Message}"
                 );
             }
         }
@@ -925,9 +917,7 @@ public class AprilTagTransforms : MonoBehaviour
         {
             if (m_enableAllDebugLogging)
             {
-                Debug.LogWarning(
-                    $"[AprilTagTransforms] Error extracting corner coordinates: {e.Message}"
-                );
+                Debug.LogWarning($"[Transforms] Error extracting corner coordinates: {e.Message}");
             }
         }
 
@@ -974,7 +964,7 @@ public class AprilTagTransforms : MonoBehaviour
         catch (Exception e)
         {
             Debug.LogWarning(
-                $"[AprilTagTransforms] Error extracting corner center for tag {tagId}: {e.Message}"
+                $"[Transforms] Error extracting corner center for tag {tagId}: {e.Message}"
             );
         }
 
@@ -1061,7 +1051,7 @@ public class AprilTagTransforms : MonoBehaviour
             if (m_enableAllDebugLogging && Time.frameCount % 300 == 0)
             {
                 Debug.LogWarning(
-                    $"[AprilTagTransforms] Failed to extract corners for tag {tagId}: {ex.Message}"
+                    $"[Transforms] Failed to extract corners for tag {tagId}: {ex.Message}"
                 );
             }
         }
@@ -1147,7 +1137,7 @@ public class AprilTagTransforms : MonoBehaviour
                             );
 
                             Debug.Log(
-                                $"[AprilTagTransforms] Found {propName} with {vector2Corners.Length} corners, center: {centerPoint}"
+                                $"[Transforms] Found {propName} with {vector2Corners.Length} corners, center: {centerPoint}"
                             );
                             return true;
                         }
@@ -1170,7 +1160,7 @@ public class AprilTagTransforms : MonoBehaviour
                             );
 
                             Debug.Log(
-                                $"[AprilTagTransforms] Found {propName} with {vector2IntCorners.Length} corners, center: {centerPoint}"
+                                $"[Transforms] Found {propName} with {vector2IntCorners.Length} corners, center: {centerPoint}"
                             );
                             return true;
                         }
@@ -1180,9 +1170,7 @@ public class AprilTagTransforms : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogWarning(
-                $"[AprilTagTransforms] Error accessing corner coordinates: {ex.Message}"
-            );
+            Debug.LogWarning($"[Transforms] Error accessing corner coordinates: {ex.Message}");
         }
 
         return false;
@@ -1203,7 +1191,7 @@ public class AprilTagTransforms : MonoBehaviour
             if (TryGetTagCenterFromCorners(tagPose, intrinsics, out var screenPoint))
             {
                 // Use corner-based center point
-                Debug.Log($"[AprilTagTransforms] Using corner-based center point: {screenPoint}");
+                Debug.Log($"[Transforms] Using corner-based center point: {screenPoint}");
             }
             else
             {
@@ -1236,7 +1224,7 @@ public class AprilTagTransforms : MonoBehaviour
                     if (m_enableAllDebugLogging)
                     {
                         Debug.Log(
-                            $"[AprilTagTransforms] Tag {tagPose.ID} passthrough raycast MISS, using last distance: {lastDistance:F3}m"
+                            $"[Transforms] Tag {tagPose.ID} passthrough raycast MISS, using last distance: {lastDistance:F3}m"
                         );
                     }
 
@@ -1266,9 +1254,7 @@ public class AprilTagTransforms : MonoBehaviour
         catch (Exception ex)
         {
             if (m_enableAllDebugLogging)
-                Debug.LogWarning(
-                    $"[AprilTagTransforms] Passthrough raycasting failed: {ex.Message}"
-                );
+                Debug.LogWarning($"[Transforms] Passthrough raycasting failed: {ex.Message}");
             return null;
         }
     }

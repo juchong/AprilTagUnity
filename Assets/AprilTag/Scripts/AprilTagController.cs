@@ -89,9 +89,13 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private bool m_usePassthroughRaycasting = true;
 
-    [Tooltip("Environment raycast manager for accurate 3D positioning")]
+    [Tooltip("Environment raycast manager for accurate 3D positioning (auto-created if null)")]
     [SerializeField]
     private EnvironmentRaycastManager m_environmentRaycastManager;
+
+    [Tooltip("Auto-create EnvironmentRaycastManager if not found")]
+    [SerializeField]
+    private bool m_autoCreateRaycastManager = true;
 
     [Tooltip(
         "Scale factor to adjust tag positioning (1.0 = normal, 0.5 = half size, 2.0 = double size)"
@@ -514,7 +518,10 @@ public class AprilTagController : MonoBehaviour
     private void Awake()
     {
         // Fix Input System issues on startup
-        AprilTag.InputSystemFixer.FixAllEventSystems();
+        FixEventSystemInputModules();
+
+        // Start the permissions manager
+        StartPermissionsManager();
 
         // Load saved runtime offset
         LoadRuntimeOffset();
@@ -523,14 +530,29 @@ public class AprilTagController : MonoBehaviour
         AprilTagPermissionsManager.OnAllPermissionsGranted += OnAllPermissionsGranted;
         AprilTagPermissionsManager.OnPermissionsDenied += OnPermissionsDenied;
 
-        // Auto-find EnvironmentRaycastManager if not assigned
+        // Auto-find or create EnvironmentRaycastManager if not assigned
         if (m_environmentRaycastManager == null && m_usePassthroughRaycasting)
         {
             m_environmentRaycastManager = FindFirstObjectByType<EnvironmentRaycastManager>();
-            if (m_environmentRaycastManager == null && m_enableAllDebugLogging)
+
+            if (m_environmentRaycastManager == null && m_autoCreateRaycastManager)
+            {
+                // Create EnvironmentRaycastManager automatically
+                var raycastManagerObj = new GameObject("EnvironmentRaycastManager");
+                m_environmentRaycastManager =
+                    raycastManagerObj.AddComponent<EnvironmentRaycastManager>();
+
+                if (m_enableAllDebugLogging)
+                {
+                    Debug.Log(
+                        "[Controller] Auto-created EnvironmentRaycastManager for passthrough raycasting"
+                    );
+                }
+            }
+            else if (m_environmentRaycastManager == null && m_enableAllDebugLogging)
             {
                 Debug.LogWarning(
-                    "[AprilTagController] No EnvironmentRaycastManager found. Passthrough raycasting will not work properly. Please assign one or disable usePassthroughRaycasting."
+                    "[Controller] No EnvironmentRaycastManager found and auto-create disabled. Passthrough raycasting will not work properly."
                 );
             }
         }
@@ -774,7 +796,7 @@ public class AprilTagController : MonoBehaviour
         if (!AprilTagPermissionsManager.HasAllPermissions)
         {
             // Only log this warning occasionally to avoid spam
-            if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
+            if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
             {
                 Debug.LogWarning("[AprilTag] Waiting for required permissions to be granted");
             }
@@ -901,10 +923,7 @@ public class AprilTagController : MonoBehaviour
                             var expectedPixels = wct.width * wct.height;
                             if (m_rgba.Length == expectedPixels)
                             {
-                                if (
-                                    m_enableAllDebugLogging
-                                    && Time.frameCount % m_debugLogInterval == 0
-                                )
+                                if (m_enableAllDebugLogging && Time.frameCount % m_logInterval == 0)
                                 {
                                     Debug.Log(
                                         $"[AprilTag] GPU preprocessing completed in {m_gpuPreprocessor.LastProcessingTimeMs:F2}ms, processed {m_rgba.Length} pixels"
@@ -964,14 +983,14 @@ public class AprilTagController : MonoBehaviour
 
             if (m_rgba == null || m_rgba.Length == 0)
             {
-                if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
+                if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
                     Debug.LogWarning("[AprilTag] No pixel data available");
                 return;
             }
         }
         catch (Exception ex)
         {
-            if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
+            if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
                 Debug.LogWarning($"[AprilTag] Failed to get pixels: {ex.Message}");
             return;
         }
@@ -1000,7 +1019,7 @@ public class AprilTagController : MonoBehaviour
             && (m_debugImageSaveInterval == 0 || Time.frameCount % m_debugImageSaveInterval == 0);
 
         // Debug logging for detection count
-        if (Time.frameCount % m_debugLogInterval == 0) // Log periodically regardless of enableAllDebugLogging
+        if (Time.frameCount % m_logInterval == 0) // Log periodically regardless of enableAllDebugLogging
         {
             var tagCount = m_detector.DetectedTags?.Count() ?? 0;
             if (tagCount == 0)
@@ -1010,7 +1029,7 @@ public class AprilTagController : MonoBehaviour
                 );
 
                 // Additional debug info
-                if (Time.frameCount % m_verboseDebugLogInterval == 0)
+                if (Time.frameCount % m_verboseLogInterval == 0)
                 {
                     Debug.Log(
                         $"[AprilTag] Detection params: Family={m_tagFamily}, MaxDetections/sec={m_maxDetectionsPerSecond}"
@@ -1123,7 +1142,7 @@ public class AprilTagController : MonoBehaviour
             {
                 if (!m_tagVizPrefab)
                 {
-                    if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
+                    if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
                     {
                         Debug.LogWarning(
                             $"[AprilTag] No tag visualization prefab assigned! Cannot create visualization for tag {t.ID}"
@@ -1261,7 +1280,7 @@ public class AprilTagController : MonoBehaviour
             else if (
                 m_enableGPUPreprocessing
                 && m_enableAllDebugLogging
-                && Time.frameCount % m_verboseDebugLogInterval == 0
+                && Time.frameCount % m_verboseLogInterval == 0
             )
             {
                 Debug.Log(
@@ -1387,7 +1406,7 @@ public class AprilTagController : MonoBehaviour
             if (m_enableAllDebugLogging)
             {
                 float memory = System.GC.GetTotalMemory(false) / 1024f / 1024f;
-                Debug.Log($"[AprilTagController] Forced GC cleanup. Memory: {memory:F1}MB");
+                Debug.Log($"[Controller] Forced GC cleanup. Memory: {memory:F1}MB");
             }
         }
     }
@@ -1455,7 +1474,7 @@ public class AprilTagController : MonoBehaviour
         if (!m_enableSpatialAnchors || m_spatialAnchorManager == null)
             return;
 
-        if (m_enableAllDebugLogging && Time.frameCount % m_debugLogInterval == 0)
+        if (m_enableAllDebugLogging && Time.frameCount % m_logInterval == 0)
         {
             Debug.Log(
                 $"[AprilTag] ProcessSpatialAnchors: Processing {m_detector.DetectedTags.Count()} detected tags"
@@ -1876,7 +1895,7 @@ public class AprilTagController : MonoBehaviour
         }
 
         // Log the current settings every 5 seconds when debugging is enabled
-        if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
+        if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
         {
             LogCurrentSettings();
         }
@@ -1907,7 +1926,7 @@ public class AprilTagController : MonoBehaviour
         // Apply exponential smoothing
         var filteredPosition = Vector3.Lerp(rawPosition, previousPosition, smoothingFactor);
 
-        if (m_enableAllDebugLogging && Time.frameCount % m_verboseDebugLogInterval == 0)
+        if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
         {
             Debug.Log(
                 $"[AprilTag] Position Filter - Raw: {rawPosition:F3}, Filtered: {filteredPosition:F3}, Factor: {smoothingFactor:F3}"
@@ -2147,7 +2166,7 @@ public class AprilTagController : MonoBehaviour
         // Clamp quality to valid range
         quality = Mathf.Clamp01(quality);
 
-        if (m_enableAllDebugLogging && Time.frameCount % m_cornerQualityLogInterval == 0)
+        if (m_enableAllDebugLogging && Time.frameCount % m_verboseLogInterval == 0)
         {
             Debug.Log(
                 $"[AprilTag] Corner Quality Assessment - Quality: {quality:F3}, AspectRatio: {aspectRatio:F2}, AngleDeviation: {avgAngleDeviation:F1}°, Convex: {isConvex}"
@@ -2608,6 +2627,56 @@ public class AprilTagController : MonoBehaviour
         // Schedule next detection (safe - we're on main thread)
         m_nextDetectT = Time.time + 1f / Mathf.Max(1f, m_maxDetectionsPerSecond);
         m_detectionInProgress = false;
+    }
+
+    /// <summary>
+    /// Fix EventSystem input modules for Input System package compatibility
+    /// Replaces StandaloneInputModule with InputSystemUIInputModule when new Input System is active
+    /// </summary>
+    private void FixEventSystemInputModules()
+    {
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+        var eventSystems = FindObjectsByType<UnityEngine.EventSystems.EventSystem>(
+            FindObjectsSortMode.None
+        );
+
+        foreach (var eventSystem in eventSystems)
+        {
+            var legacyInputModule =
+                eventSystem.GetComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+            if (legacyInputModule != null)
+            {
+                if (m_enableAllDebugLogging)
+                {
+                    Debug.Log(
+                        $"[Controller] Replacing StandaloneInputModule with InputSystemUIInputModule on {eventSystem.name}"
+                    );
+                }
+                DestroyImmediate(legacyInputModule);
+                eventSystem.gameObject.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+            }
+        }
+#endif
+    }
+
+    /// <summary>
+    /// Ensure AprilTagPermissionsManager exists in scene (auto-create if needed)
+    /// </summary>
+    private void StartPermissionsManager()
+    {
+        var permissionsManager = FindFirstObjectByType<AprilTagPermissionsManager>();
+
+        if (permissionsManager == null)
+        {
+            // Create permissions manager automatically
+            var permManagerObj = new GameObject("AprilTagPermissionsManager");
+            permissionsManager = permManagerObj.AddComponent<AprilTagPermissionsManager>();
+
+            if (m_enableAllDebugLogging)
+            {
+                Debug.Log("[Controller] Auto-created AprilTagPermissionsManager");
+            }
+        }
     }
 
     private void DisposeDetector()

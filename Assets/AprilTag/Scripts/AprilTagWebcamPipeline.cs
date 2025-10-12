@@ -14,8 +14,13 @@ public class AprilTagWebcamPipeline : MonoBehaviour
 {
     // References and configuration needed by the pipeline
     [Header("Passthrough Feed (Pipeline)")]
+    [Tooltip("WebCamTextureManager from Meta Passthrough samples (auto-created if null)")]
     [SerializeField]
     private UnityEngine.Object m_webCamManager; // Typically PassthroughCameraSamples.WebCamTextureManager
+
+    [Tooltip("Auto-create WebCamTextureManager if not found")]
+    [SerializeField]
+    private bool m_autoCreateWebCamManager = true;
 
     [SerializeField]
     private WebCamTexture m_webCamTextureOverride;
@@ -32,10 +37,6 @@ public class AprilTagWebcamPipeline : MonoBehaviour
     [SerializeField]
     private bool m_enableDebugLogging = false;
 
-    [Tooltip("Frame interval for debug logs (higher = less frequent)")]
-    [SerializeField]
-    private int m_logInterval = 300;
-
     // Detector state (only used if this component owns the detector)
     private TagDetector m_detector;
     private int m_detW,
@@ -45,6 +46,40 @@ public class AprilTagWebcamPipeline : MonoBehaviour
 
     [SerializeField]
     private AprilTag.Interop.TagFamily m_tagFamily = AprilTag.Interop.TagFamily.Tag36h11;
+
+    private void Awake()
+    {
+        // Auto-create WebCamTextureManager if needed
+        if (m_webCamManager == null && m_autoCreateWebCamManager && m_webCamTextureOverride == null)
+        {
+            // Try to find existing WebCamTextureManager
+            var existingManager =
+                FindFirstObjectByType<PassthroughCameraSamples.WebCamTextureManager>();
+
+            if (existingManager != null)
+            {
+                m_webCamManager = existingManager;
+
+                if (m_enableDebugLogging)
+                {
+                    Debug.Log("[WebcamPipeline] Found existing WebCamTextureManager");
+                }
+            }
+            else
+            {
+                // Create WebCamTextureManager automatically
+                var managerObj = new GameObject("WebCamTextureManager");
+                var manager =
+                    managerObj.AddComponent<PassthroughCameraSamples.WebCamTextureManager>();
+                m_webCamManager = manager;
+
+                if (m_enableDebugLogging)
+                {
+                    Debug.Log("[WebcamPipeline] Auto-created WebCamTextureManager");
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Returns the active passthrough camera eye from the WebCam manager.
@@ -139,7 +174,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                 {
                     if (m_enableDebugLogging)
                         Debug.Log(
-                            $"[AprilTagWebcamPipeline] Using OVRCameraRig center eye anchor for Quest positioning"
+                            $"[WebcamPipeline] Using OVRCameraRig center eye anchor for Quest positioning"
                         );
                     return centerEyeAnchor;
                 }
@@ -150,7 +185,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
             if (xrOrigin != null && xrOrigin.Camera != null)
             {
                 if (m_enableDebugLogging)
-                    Debug.Log($"[AprilTagWebcamPipeline] Using XR Origin camera for Quest positioning");
+                    Debug.Log($"[WebcamPipeline] Using XR Origin camera for Quest positioning");
                 return xrOrigin.Camera.transform;
             }
         }
@@ -176,7 +211,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
             {
                 if (m_enableDebugLogging)
                     Debug.Log(
-                        $"[AprilTagWebcamPipeline] Using camera '{cam.name}' as reference for tag positioning"
+                        $"[WebcamPipeline] Using camera '{cam.name}' as reference for tag positioning"
                     );
                 return cam.transform;
             }
@@ -197,7 +232,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                 {
                     if (m_enableDebugLogging)
                         Debug.Log(
-                            $"[AprilTagWebcamPipeline] Using WebCam manager camera '{cam.name}' as reference for tag positioning"
+                            $"[WebcamPipeline] Using WebCam manager camera '{cam.name}' as reference for tag positioning"
                         );
                     return cam.transform;
                 }
@@ -208,7 +243,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
         var fallbackCam = Camera.main ? Camera.main.transform : transform;
         if (m_enableDebugLogging)
             Debug.Log(
-                $"[AprilTagWebcamPipeline] Using fallback camera '{fallbackCam.name}' as reference for tag positioning"
+                $"[WebcamPipeline] Using fallback camera '{fallbackCam.name}' as reference for tag positioning"
             );
         return fallbackCam;
     }
@@ -224,7 +259,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
 
         if (m_enableDebugLogging)
             Debug.Log(
-                $"[AprilTagWebcamPipeline] Created detector: {width}x{height}, family={m_tagFamily}, decimate={Mathf.Max(1, dec)}"
+                $"[WebcamPipeline] Created detector: {width}x{height}, family={m_tagFamily}, decimate={Mathf.Max(1, dec)}"
             );
     }
 
@@ -291,7 +326,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                     catch (Exception e)
                     {
                         Debug.LogWarning(
-                            $"[AprilTagWebcamPipeline] Error accessing property {prop.Name}: {e.Message}"
+                            $"[WebcamPipeline] Error accessing property {prop.Name}: {e.Message}"
                         );
                     }
                 }
@@ -323,7 +358,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                     catch (Exception e)
                     {
                         Debug.LogWarning(
-                            $"[AprilTagWebcamPipeline] Error accessing field {field.Name}: {e.Message}"
+                            $"[WebcamPipeline] Error accessing field {field.Name}: {e.Message}"
                         );
                     }
                 }
@@ -333,7 +368,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
         {
             if (m_enableDebugLogging)
             {
-                Debug.LogWarning($"[AprilTagWebcamPipeline] Error accessing raw detections: {e.Message}");
+                Debug.LogWarning($"[WebcamPipeline] Error accessing raw detections: {e.Message}");
             }
         }
 
@@ -387,7 +422,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                     catch (Exception e)
                     {
                         Debug.LogWarning(
-                            $"[AprilTagWebcamPipeline] Error accessing property {prop.Name}: {e.Message}"
+                            $"[WebcamPipeline] Error accessing property {prop.Name}: {e.Message}"
                         );
                     }
                 }
@@ -420,7 +455,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
                     catch (Exception e)
                     {
                         Debug.LogWarning(
-                            $"[AprilTagWebcamPipeline] Error accessing field {field.Name}: {e.Message}"
+                            $"[WebcamPipeline] Error accessing field {field.Name}: {e.Message}"
                         );
                     }
                 }
@@ -429,7 +464,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
             if (m_enableDebugLogging)
             {
                 Debug.LogWarning(
-                    "[AprilTagWebcamPipeline] No raw detection data found - corner detection will not work"
+                    "[WebcamPipeline] No raw detection data found - corner detection will not work"
                 );
             }
         }
@@ -437,7 +472,7 @@ public class AprilTagWebcamPipeline : MonoBehaviour
         {
             if (m_enableDebugLogging)
             {
-                Debug.LogWarning($"[AprilTagWebcamPipeline] Error accessing raw detections: {e.Message}");
+                Debug.LogWarning($"[WebcamPipeline] Error accessing raw detections: {e.Message}");
             }
         }
 

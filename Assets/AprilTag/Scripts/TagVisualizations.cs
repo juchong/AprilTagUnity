@@ -37,7 +37,7 @@ public class TagVisualizations : MonoBehaviour
         if (bodyColor.a >= 1f)
         {
             Debug.LogWarning(
-                $"[AprilTagViz] Body color alpha was {bodyColor.a}, setting to 0.5 for transparency"
+                $"[Visualizations] Body color alpha was {bodyColor.a}, setting to 0.5 for transparency"
             );
             bodyColor = new Color(bodyColor.r, bodyColor.g, bodyColor.b, 0.5f);
         }
@@ -57,7 +57,7 @@ public class TagVisualizations : MonoBehaviour
         var controller = FindFirstObjectByType<AprilTagController>();
         if (controller == null)
         {
-            Debug.LogWarning("[AprilTagViz] No AprilTagController found in scene.");
+            Debug.LogWarning("[Visualizations] No AprilTagController found in scene.");
             return;
         }
 
@@ -76,14 +76,14 @@ public class TagVisualizations : MonoBehaviour
 
         if (prefabField == null)
         {
-            Debug.LogError("[AprilTagViz] Could not find m_tagVizPrefab on AprilTagController.");
+            Debug.LogError("[Visualizations] Could not find m_tagVizPrefab on AprilTagController.");
             Destroy(template);
             return;
         }
 
         prefabField.SetValue(controller, template);
         Debug.Log(
-            $"[AprilTagViz] Assigned runtime visualization template '{template.name}' to AprilTagController."
+            $"[Visualizations] Assigned runtime visualization template '{template.name}' to AprilTagController."
         );
 
         // Also generate and assign anchor prefab to the building block
@@ -101,7 +101,9 @@ public class TagVisualizations : MonoBehaviour
             FindFirstObjectByType<Meta.XR.BuildingBlocks.SpatialAnchorSpawnerBuildingBlock>();
         if (spawner == null)
         {
-            Debug.LogWarning("[AprilTagViz] No SpatialAnchorSpawnerBuildingBlock found in scene.");
+            Debug.LogWarning(
+                "[Visualizations] No SpatialAnchorSpawnerBuildingBlock found in scene."
+            );
             return;
         }
 
@@ -174,7 +176,7 @@ public class TagVisualizations : MonoBehaviour
         spawner.AnchorPrefab = anchorPrefab;
 
         Debug.Log(
-            $"[AprilTagViz] Generated and assigned runtime anchor prefab to SpatialAnchorSpawnerBuildingBlock"
+            $"[Visualizations] Generated and assigned runtime anchor prefab to SpatialAnchorSpawnerBuildingBlock"
         );
     }
 
@@ -217,7 +219,7 @@ public class TagVisualizations : MonoBehaviour
                 shader = Shader.Find(shaderName);
                 if (shader != null)
                 {
-                    Debug.Log($"[AprilTagViz] Found shader: {shaderName}");
+                    Debug.Log($"[Visualizations] Found shader: {shaderName}");
                     break;
                 }
             }
@@ -225,7 +227,9 @@ public class TagVisualizations : MonoBehaviour
             // If no shader found, create a basic transparent one
             if (shader == null)
             {
-                Debug.LogWarning("[AprilTagViz] No suitable shader found, using Standard shader");
+                Debug.LogWarning(
+                    "[Visualizations] No suitable shader found, using Standard shader"
+                );
                 shader = Shader.Find("Standard");
             }
 
@@ -282,7 +286,7 @@ public class TagVisualizations : MonoBehaviour
             bodyRenderer.enabled = true;
 
             // Extensive debugging
-            Debug.Log($"[AprilTagViz] Material setup complete:");
+            Debug.Log($"[Visualizations] Material setup complete:");
             Debug.Log($"  Shader: {shader.name}");
             Debug.Log($"  Color: RGBA({bodyColor.r}, {bodyColor.g}, {bodyColor.b}, {bodyColor.a})");
             Debug.Log(

@@ -148,7 +148,7 @@ namespace AprilTag
                 if (m_preprocessorShader == null)
                 {
                     Debug.LogError(
-                        $"[AprilTagGPU] Failed to load preprocessing compute shader! Make sure Assets/AprilTag/Resources/{m_preprocessorShaderPath}.compute exists."
+                        $"[GPU] Failed to load preprocessing compute shader! Make sure Assets/AprilTag/Resources/{m_preprocessorShaderPath}.compute exists."
                     );
                     _isInitialized = false;
                     return;
@@ -157,7 +157,7 @@ namespace AprilTag
                 if (m_histogramShader == null)
                 {
                     Debug.LogError(
-                        $"[AprilTagGPU] Failed to load histogram compute shader! Make sure Assets/AprilTag/Resources/{m_histogramShaderPath}.compute exists."
+                        $"[GPU] Failed to load histogram compute shader! Make sure Assets/AprilTag/Resources/{m_histogramShaderPath}.compute exists."
                     );
                     _isInitialized = false;
                     return;
@@ -166,9 +166,7 @@ namespace AprilTag
                 // Verify compute shader support
                 if (!SystemInfo.supportsComputeShaders)
                 {
-                    Debug.LogError(
-                        "[AprilTagGPU] Compute shaders are not supported on this device!"
-                    );
+                    Debug.LogError("[GPU] Compute shaders are not supported on this device!");
                     _isInitialized = false;
                     return;
                 }
@@ -197,7 +195,7 @@ namespace AprilTag
             }
             catch (Exception e)
             {
-                Debug.LogError($"[AprilTagGPU] Initialization failed: {e.Message}");
+                Debug.LogError($"[GPU] Initialization failed: {e.Message}");
                 _isInitialized = false;
             }
         }
@@ -308,9 +306,7 @@ namespace AprilTag
         {
             if (!_isInitialized || source == null || !source.isPlaying)
             {
-                Debug.LogWarning(
-                    "[AprilTagGPU] Cannot process - not initialized or source not ready"
-                );
+                Debug.LogWarning("[GPU] Cannot process - not initialized or source not ready");
                 return null;
             }
 
@@ -318,7 +314,7 @@ namespace AprilTag
             if (source.width > m_maxImageWidth || source.height > m_maxImageHeight)
             {
                 Debug.LogWarning(
-                    $"[AprilTagGPU] Image too large for GPU processing: {source.width}x{source.height} exceeds limits ({m_maxImageWidth}x{m_maxImageHeight}). Skipping preprocessing."
+                    $"[GPU] Image too large for GPU processing: {source.width}x{source.height} exceeds limits ({m_maxImageWidth}x{m_maxImageHeight}). Skipping preprocessing."
                 );
                 return null;
             }
@@ -339,7 +335,7 @@ namespace AprilTag
             }
             catch (Exception e)
             {
-                Debug.LogError($"[AprilTagGPU] GPU processing failed: {e.Message}");
+                Debug.LogError($"[GPU] GPU processing failed: {e.Message}");
                 return null;
             }
         }
@@ -351,7 +347,7 @@ namespace AprilTag
         {
             if (!_isInitialized || source == null)
             {
-                Debug.LogWarning("[AprilTagGPU] Cannot process - not initialized or source null");
+                Debug.LogWarning("[GPU] Cannot process - not initialized or source null");
                 return null;
             }
 
@@ -544,7 +540,7 @@ namespace AprilTag
             if (!_isInitialized || m_finalRGBATexture == null)
             {
                 Debug.LogWarning(
-                    "[AprilTagGPU] Cannot get processed pixels - preprocessor not initialized or final RGBA texture is null"
+                    "[GPU] Cannot get processed pixels - preprocessor not initialized or final RGBA texture is null"
                 );
                 return null;
             }
@@ -579,9 +575,7 @@ namespace AprilTag
                 // Validate pixel array size
                 if (pixels == null || pixels.Length == 0)
                 {
-                    Debug.LogError(
-                        "[AprilTagGPU] Got null or empty pixel array from processed texture"
-                    );
+                    Debug.LogError("[GPU] Got null or empty pixel array from processed texture");
                     return null;
                 }
 
@@ -590,7 +584,7 @@ namespace AprilTag
                 if (pixels.Length != expectedPixels)
                 {
                     Debug.LogError(
-                        $"[AprilTagGPU] Pixel count mismatch: expected {expectedPixels}, got {pixels.Length}"
+                        $"[GPU] Pixel count mismatch: expected {expectedPixels}, got {pixels.Length}"
                     );
                     return null;
                 }
@@ -599,7 +593,7 @@ namespace AprilTag
             }
             catch (Exception e)
             {
-                Debug.LogError($"[AprilTagGPU] Failed to read processed pixels: {e.Message}");
+                Debug.LogError($"[GPU] Failed to read processed pixels: {e.Message}");
                 return null;
             }
         }
