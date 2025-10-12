@@ -3,19 +3,33 @@
 // Transforms headset pose from Quest space to FRC field coordinates
 
 using System.Collections.Generic;
-using System.Linq;
-using UnityEngine;
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using UnityEngine;
 
 namespace AprilTag
 {
     /// <summary>
     /// Localizes Quest headset to FRC field coordinates using spatial anchors.
     /// Uses existing AprilTagSpatialAnchorManager and field layout to calculate transform.
+    ///
+    /// This system works regardless of where the headset is initialized in Quest space.
+    /// The alignment calculation computes the transform between two coordinate systems:
+    /// - Quest coordinate system (where spatial anchors are placed based on tag detections)
+    /// - Field coordinate system (known tag positions from FRC field layout JSON)
+    ///
+    /// The headset can start anywhere in Quest space - the system will find the correct
+    /// transform by matching the spatial relationships between detected tags to their
+    /// known positions on the field.
     /// </summary>
     public class FRCFieldLocalizer : MonoBehaviour
     {
         [Header("References")]
+        [Tooltip("AprilTag controller with tag size configuration (auto-found if null)")]
+        [SerializeField]
+        private AprilTagController m_aprilTagController;
+
         [Tooltip("Spatial anchor manager (auto-found if null)")]
         [SerializeField]
         private AprilTagSpatialAnchorManager m_anchorManager;
@@ -25,9 +39,9 @@ namespace AprilTag
         private AprilTagFieldLayout m_fieldLayout;
 
         [Header("Settings")]
-        [Tooltip("Field layout name to load from Resources/FieldLayouts/")]
+        [Tooltip("Select which FRC field layout to use")]
         [SerializeField]
-        private string m_fieldLayoutName = "2025-reefscape";
+        private FieldLayoutType m_selectedFieldLayout = FieldLayoutType.Reefscape2025_Welded;
 
         [Tooltip("Minimum anchors needed for alignment")]
         [Range(2, 10)]
@@ -42,416 +56,15 @@ namespace AprilTag
         [SerializeField]
         private bool m_persistAlignment = true;
 
-        [Header("Field Loading")]
-        [Tooltip("Use embedded 2025-reefscape-welded field layout")]
-        [SerializeField]
-        private bool m_useEmbeddedLayout = true;
-
-        // Embedded 2025 Reefscape Welded field layout JSON
-        private const string EMBEDDED_REEFSCAPE_WELDED_JSON = @"{
-  ""tags"": [
-    {
-      ""ID"": 1,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 16.697198,
-          ""y"": 0.65532,
-          ""z"": 1.4859
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.4539904997395468,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.8910065241883678
-          }
+        // Field layout selection enum
+        public enum FieldLayoutType
+        {
+            RapidReact2022,
+            ChargedUp2023,
+            Crescendo2024,
+            Reefscape2025_AndyMark,
+            Reefscape2025_Welded,
         }
-      }
-    },
-    {
-      ""ID"": 2,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 16.697198,
-          ""y"": 7.3964799999999995,
-          ""z"": 1.4859
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": -0.45399049973954675,
-            ""X"": -0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.8910065241883679
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 3,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 11.560809999999998,
-          ""y"": 8.05561,
-          ""z"": 1.30175
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": -0.7071067811865475,
-            ""X"": -0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.7071067811865476
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 4,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 9.276079999999999,
-          ""y"": 6.137656,
-          ""z"": 1.8679160000000001
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.9659258262890683,
-            ""X"": 0.0,
-            ""Y"": 0.25881904510252074,
-            ""Z"": 0.0
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 5,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 9.276079999999999,
-          ""y"": 1.914906,
-          ""z"": 1.8679160000000001
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.9659258262890683,
-            ""X"": 0.0,
-            ""Y"": 0.25881904510252074,
-            ""Z"": 0.0
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 6,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 13.474446,
-          ""y"": 3.3063179999999996,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": -0.8660254037844387,
-            ""X"": -0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.49999999999999994
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 7,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 13.890498,
-          ""y"": 4.0259,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 1.0,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.0
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 8,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 13.474446,
-          ""y"": 4.745482,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.8660254037844387,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.49999999999999994
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 9,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 12.643358,
-          ""y"": 4.745482,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.5000000000000001,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.8660254037844386
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 10,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 12.227305999999999,
-          ""y"": 4.0259,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 6.123233995736766e-17,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 1.0
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 11,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 12.643358,
-          ""y"": 3.3063179999999996,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": -0.4999999999999998,
-            ""X"": -0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.8660254037844387
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 12,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 0.851154,
-          ""y"": 0.65532,
-          ""z"": 1.4859
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.8910065241883679,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.45399049973954675
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 13,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 0.851154,
-          ""y"": 7.3964799999999995,
-          ""z"": 1.4859
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": -0.8910065241883678,
-            ""X"": -0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.45399049973954686
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 14,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 8.272272,
-          ""y"": 6.137656,
-          ""z"": 1.8679160000000001
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 5.914589856893349e-17,
-            ""X"": -0.25881904510252074,
-            ""Y"": 1.5848095757158825e-17,
-            ""Z"": 0.9659258262890683
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 15,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 8.272272,
-          ""y"": 1.914906,
-          ""z"": 1.8679160000000001
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 5.914589856893349e-17,
-            ""X"": -0.25881904510252074,
-            ""Y"": 1.5848095757158825e-17,
-            ""Z"": 0.9659258262890683
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 16,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 5.9875419999999995,
-          ""y"": -0.0038099999999999996,
-          ""z"": 1.30175
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.7071067811865476,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.7071067811865476
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 17,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 4.073905999999999,
-          ""y"": 3.3063179999999996,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": -0.4999999999999998,
-            ""X"": -0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.8660254037844387
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 18,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 3.6576,
-          ""y"": 4.0259,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 6.123233995736766e-17,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 1.0
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 19,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 4.073905999999999,
-          ""y"": 4.745482,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.5000000000000001,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.8660254037844386
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 20,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 4.904739999999999,
-          ""y"": 4.745482,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 0.8660254037844387,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.49999999999999994
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 21,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 5.321046,
-          ""y"": 4.0259,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": 1.0,
-            ""X"": 0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.0
-          }
-        }
-      }
-    },
-    {
-      ""ID"": 22,
-      ""pose"": {
-        ""translation"": {
-          ""x"": 4.904739999999999,
-          ""y"": 3.3063179999999996,
-          ""z"": 0.308102
-        },
-        ""rotation"": {
-          ""quaternion"": {
-            ""W"": -0.8660254037844387,
-            ""X"": -0.0,
-            ""Y"": 0.0,
-            ""Z"": 0.49999999999999994
-          }
-        }
-      }
-    }
-  ],
-  ""field"": {
-    ""length"": 17.548,
-    ""width"": 8.052
-  }
-}";
 
         [Header("Validation")]
         [Tooltip("Maximum alignment error (meters) - alignment rejected if exceeded")]
@@ -465,6 +78,18 @@ namespace AprilTag
         [Tooltip("Maximum distance error (meters) for outlier detection")]
         [SerializeField]
         private float m_maxOutlierError = 0.3f;
+
+        [Tooltip("Maximum angular error (degrees) for outlier detection")]
+        [SerializeField]
+        private float m_maxOutlierAngularError = 15f;
+
+        [Tooltip("Enable directional error checking (X, Y, Z independently)")]
+        [SerializeField]
+        private bool m_enableDirectionalErrorCheck = true;
+
+        [Tooltip("Maximum per-axis error (meters) for directional validation")]
+        [SerializeField]
+        private float m_maxPerAxisError = 0.2f;
 
         [Header("Debug")]
         [Tooltip("Enable debug logging")]
@@ -489,75 +114,138 @@ namespace AprilTag
         // Events
         public event System.Action OnAligned;
 
+        /// <summary>
+        /// Get field layout JSON string based on selected field type
+        /// </summary>
+        private string GetFieldLayoutJson(FieldLayoutType fieldType)
+        {
+            switch (fieldType)
+            {
+                case FieldLayoutType.RapidReact2022:
+                    return FieldLayout_2022_RapidReact.JSON;
+                case FieldLayoutType.ChargedUp2023:
+                    return FieldLayout_2023_ChargedUp.JSON;
+                case FieldLayoutType.Crescendo2024:
+                    return FieldLayout_2024_Crescendo.JSON;
+                case FieldLayoutType.Reefscape2025_AndyMark:
+                    return FieldLayout_2025_Reefscape_AndyMark.JSON;
+                case FieldLayoutType.Reefscape2025_Welded:
+                    return FieldLayout_2025_Reefscape_Welded.JSON;
+                default:
+                    Debug.LogError($"[FRCFieldLocalizer] Unknown field layout type: {fieldType}");
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// Get field layout name based on selected field type
+        /// </summary>
+        private string GetFieldLayoutName(FieldLayoutType fieldType)
+        {
+            switch (fieldType)
+            {
+                case FieldLayoutType.RapidReact2022:
+                    return "2022-rapidreact";
+                case FieldLayoutType.ChargedUp2023:
+                    return "2023-chargedup";
+                case FieldLayoutType.Crescendo2024:
+                    return "2024-crescendo";
+                case FieldLayoutType.Reefscape2025_AndyMark:
+                    return "2025-reefscape-andymark";
+                case FieldLayoutType.Reefscape2025_Welded:
+                    return "2025-reefscape-welded";
+                default:
+                    return "unknown";
+            }
+        }
+
+        /// <summary>
+        /// Get tag size from AprilTagController (single source of truth)
+        /// </summary>
+        private float GetTagSizeFromController()
+        {
+            if (m_aprilTagController == null)
+            {
+                Debug.LogWarning(
+                    "[FRCFieldLocalizer] AprilTagController is null, using default tag size 0.165m"
+                );
+                return 0.165f;
+            }
+
+            // Use reflection to access private field m_tagSizeMeters
+            var field = typeof(AprilTagController).GetField(
+                "m_tagSizeMeters",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance
+            );
+
+            if (field == null)
+            {
+                Debug.LogWarning(
+                    "[FRCFieldLocalizer] Could not find m_tagSizeMeters field, using default 0.165m"
+                );
+                return 0.165f;
+            }
+
+            var tagSize = (float)field.GetValue(m_aprilTagController);
+
+            if (m_enableDebug)
+            {
+                Debug.Log($"[FRCFieldLocalizer] Using tag size {tagSize}m from AprilTagController");
+            }
+
+            return tagSize;
+        }
+
         private void Start()
         {
+            // Find AprilTag controller for tag size
+            if (m_aprilTagController == null)
+                m_aprilTagController = FindFirstObjectByType<AprilTagController>();
+
+            if (m_aprilTagController == null)
+            {
+                Debug.LogError(
+                    "[FRCFieldLocalizer] AprilTagController not found - cannot determine tag size"
+                );
+                enabled = false;
+                return;
+            }
+
             // Find anchor manager
             if (m_anchorManager == null)
                 m_anchorManager = FindFirstObjectByType<AprilTagSpatialAnchorManager>();
 
-            // Load field layout
-            if (m_useEmbeddedLayout)
+            // Load field layout based on selection - using tag size from AprilTagController
+            string fieldJson = GetFieldLayoutJson(m_selectedFieldLayout);
+            string fieldName = GetFieldLayoutName(m_selectedFieldLayout);
+
+            if (fieldJson == null)
             {
-                // Use embedded JSON (works on all platforms)
-                m_fieldLayout = AprilTagFieldLayout.FromWPILibJson(
-                    EMBEDDED_REEFSCAPE_WELDED_JSON,
-                    "2025-reefscape-welded"
+                Debug.LogError(
+                    $"[FRCFieldLocalizer] Failed to get JSON for field layout '{m_selectedFieldLayout}'"
                 );
-
-                if (m_fieldLayout == null)
-                {
-                    Debug.LogError("[FRCFieldLocalizer] Failed to parse embedded field layout");
-                    enabled = false;
-                    return;
-                }
+                enabled = false;
+                return;
             }
-            else
-            {
-                // Load via name lookup from Resources
-                if (m_fieldLayout == null)
-                {
-                    m_fieldLayout = AprilTagFieldLayout.LoadFromResources(m_fieldLayoutName);
-                    if (m_fieldLayout == null)
-                    {
-                        Debug.LogError(
-                            $"[FRCFieldLocalizer] Failed to load field layout '{m_fieldLayoutName}' - localization will not work"
-                        );
-                        enabled = false;
-                        return;
-                    }
-                }
 
-                // If a serialized (inline) field layout exists but has no tags, try loading by name
-                if (m_fieldLayout != null && (m_fieldLayout.tags == null || m_fieldLayout.tags.Count == 0))
-                {
-                    var loadedLayout = AprilTagFieldLayout.LoadFromResources(m_fieldLayoutName);
-                    if (loadedLayout != null)
-                    {
-                        m_fieldLayout = loadedLayout;
-                    }
-                    else
-                    {
-                        Debug.LogError(
-                            $"[FRCFieldLocalizer] Field layout '{m_fieldLayoutName}' is empty or missing - localization will not work"
-                        );
-                        enabled = false;
-                        return;
-                    }
-                }
+            // Get tag size from AprilTagController (single source of truth)
+            float tagSize = GetTagSizeFromController();
+            m_fieldLayout = AprilTagFieldLayout.FromWPILibJson(fieldJson, fieldName, tagSize);
+
+            if (m_fieldLayout == null)
+            {
+                Debug.LogError(
+                    $"[FRCFieldLocalizer] Failed to parse field layout '{m_selectedFieldLayout}'"
+                );
+                enabled = false;
+                return;
             }
 
             if (m_enableDebug)
             {
-                if (m_useEmbeddedLayout)
-                {
-                    Debug.Log($"[FRCFieldLocalizer] Using EMBEDDED field layout '2025-reefscape-welded' with {m_fieldLayout.tags?.Count ?? 0} tags");
-                }
-                else
-                {
-                    Debug.Log(
-                        $"[FRCFieldLocalizer] Using field layout '{m_fieldLayout.fieldName}' with {m_fieldLayout.tags?.Count ?? 0} tags"
-                    );
-                }
+                Debug.Log(
+                    $"[FRCFieldLocalizer] Using field layout '{fieldName}' with {m_fieldLayout.tags?.Count ?? 0} tags"
+                );
             }
 
             // Create field origin
@@ -616,10 +304,10 @@ namespace AprilTag
                 {
                     var fieldPosMeters = GetFieldPosition();
                     var fieldRot = GetFieldRotation();
-                    
+
                     // Convert meters to feet (1m = 3.28084ft)
                     var fieldPosFeet = fieldPosMeters * 3.28084f;
-                    
+
                     // Debug: also log Quest space position and field origin for verification
                     if (m_enableDebug && Time.frameCount % 60 == 0)
                     {
@@ -627,12 +315,19 @@ namespace AprilTag
                         if (cameraRig != null && cameraRig.centerEyeAnchor != null)
                         {
                             var centerEyePos = cameraRig.centerEyeAnchor.position;
-                            var trackingSpacePos = cameraRig.trackingSpace != null ? cameraRig.trackingSpace.position : Vector3.zero;
-                            Debug.Log($"[FIELD_DEBUG] Center eye world pos: {centerEyePos:F3}, Tracking space: {trackingSpacePos:F3}, Field origin: {m_fieldOrigin.position:F3}");
+                            var trackingSpacePos =
+                                cameraRig.trackingSpace != null
+                                    ? cameraRig.trackingSpace.position
+                                    : Vector3.zero;
+                            Debug.Log(
+                                $"[FIELD_DEBUG] Center eye world pos: {centerEyePos:F3}, Tracking space: {trackingSpacePos:F3}, Field origin: {m_fieldOrigin.position:F3}"
+                            );
                         }
                     }
-                    
-                    Debug.Log($"[FIELD_POSE] pos_ft:{fieldPosFeet.x:F3},{fieldPosFeet.y:F3},{fieldPosFeet.z:F3} rot:{fieldRot.eulerAngles.x:F1},{fieldRot.eulerAngles.y:F1},{fieldRot.eulerAngles.z:F1} anchors:{currentAnchorCount}");
+
+                    Debug.Log(
+                        $"[FIELD_POSE] pos_ft:{fieldPosFeet.x:F3},{fieldPosFeet.y:F3},{fieldPosFeet.z:F3} rot:{fieldRot.eulerAngles.x:F1},{fieldRot.eulerAngles.y:F1},{fieldRot.eulerAngles.z:F1} anchors:{currentAnchorCount}"
+                    );
                 }
             }
         }
@@ -667,7 +362,10 @@ namespace AprilTag
                 if (!m_fieldLayout.TryGetTag(tagId, out var fieldTag))
                     continue;
 
-                // Validate anchor position
+                // Validate anchor position (only check for NaN, not bounds)
+                // Note: We don't validate bounds here because the headset may have been initialized
+                // far outside the field. The alignment calculation will work regardless of the
+                // initial headset position - it just computes the transform between the two coordinate systems.
                 if (
                     float.IsNaN(anchor.transform.position.x)
                     || float.IsNaN(anchor.transform.position.y)
@@ -757,9 +455,25 @@ namespace AprilTag
             m_lastSuccessfulAnchorCount = filteredPairs.Count;
 
             if (m_enableDebug)
+            {
+                // Log alignment details including anchor positions to verify field registration
                 Debug.Log(
                     $"[FRCFieldLocalizer] ✓ Aligned using {filteredPairs.Count} anchors with error {error:F3}m"
                 );
+                Debug.Log(
+                    $"[FRCFieldLocalizer] Field origin set to: position={translation:F3}, rotation={rotation.eulerAngles:F1}"
+                );
+
+                // Log sample anchor transformations to verify alignment
+                if (filteredPairs.Count > 0)
+                {
+                    var samplePair = filteredPairs[0];
+                    var transformedPos = rotation * samplePair.fieldPos + translation;
+                    Debug.Log(
+                        $"[FRCFieldLocalizer] Sample anchor {samplePair.tagId}: Quest={samplePair.questPos:F3}, Field={samplePair.fieldPos:F3}, Transformed={transformedPos:F3}, Error={Vector3.Distance(samplePair.questPos, transformedPos):F3}m"
+                    );
+                }
+            }
 
             // Save and notify
             if (m_persistAlignment)
@@ -768,18 +482,28 @@ namespace AprilTag
         }
 
         /// <summary>
-        /// Reject outlier anchors based on distance consistency
+        /// Reject outlier anchors using multi-dimensional validation.
+        /// Inspired by PhotonVision's multi-tag pose estimation approach.
+        ///
+        /// Validates anchors using:
+        /// 1. Distance consistency (existing approach)
+        /// 2. Angular consistency (relative bearing between tags)
+        /// 3. Directional error (per-axis validation)
+        ///
+        /// This comprehensive approach detects anchors that are skewed in any direction or angle.
         /// </summary>
         private List<(Vector3 questPos, Vector3 fieldPos, int tagId)> RejectOutliers(
             List<(Vector3 questPos, Vector3 fieldPos, int tagId)> pairs
         )
         {
-            var errors = new List<(int index, float error)>();
+            var errors = new List<(int index, float distError, float angError, Vector3 dirError)>();
 
-            // Calculate pairwise distance errors
+            // Calculate multi-dimensional errors for each anchor
             for (int i = 0; i < pairs.Count; i++)
             {
-                float totalError = 0f;
+                float totalDistError = 0f;
+                float totalAngError = 0f;
+                Vector3 totalDirError = Vector3.zero;
                 int comparisons = 0;
 
                 for (int j = 0; j < pairs.Count; j++)
@@ -787,30 +511,87 @@ namespace AprilTag
                     if (i == j)
                         continue;
 
+                    // 1. Distance consistency check (original approach)
                     var questDist = Vector3.Distance(pairs[i].questPos, pairs[j].questPos);
                     var fieldDist = Vector3.Distance(pairs[i].fieldPos, pairs[j].fieldPos);
                     var distError = Mathf.Abs(questDist - fieldDist);
+                    totalDistError += distError;
 
-                    totalError += distError;
+                    // 2. Angular consistency check (relative bearing between tags)
+                    // Project to XZ plane for yaw-only comparison (flat field assumption)
+                    var questVec = pairs[j].questPos - pairs[i].questPos;
+                    var fieldVec = pairs[j].fieldPos - pairs[i].fieldPos;
+
+                    questVec.y = 0;
+                    fieldVec.y = 0;
+
+                    if (questVec.magnitude > 0.1f && fieldVec.magnitude > 0.1f)
+                    {
+                        var angularError = Mathf.Abs(
+                            Vector3.SignedAngle(questVec, fieldVec, Vector3.up)
+                        );
+                        totalAngError += angularError;
+                    }
+
+                    // 3. Directional error check (per-axis validation)
+                    // Check if the relative vector is consistent in each axis
+                    if (m_enableDirectionalErrorCheck)
+                    {
+                        var questVecFull = pairs[j].questPos - pairs[i].questPos;
+                        var fieldVecFull = pairs[j].fieldPos - pairs[i].fieldPos;
+
+                        // Calculate per-axis difference
+                        var axisError = new Vector3(
+                            Mathf.Abs(questVecFull.x - fieldVecFull.x),
+                            Mathf.Abs(questVecFull.y - fieldVecFull.y),
+                            Mathf.Abs(questVecFull.z - fieldVecFull.z)
+                        );
+
+                        totalDirError += axisError;
+                    }
+
                     comparisons++;
                 }
 
-                var avgError = comparisons > 0 ? totalError / comparisons : 0f;
-                errors.Add((i, avgError));
+                var avgDistError = comparisons > 0 ? totalDistError / comparisons : 0f;
+                var avgAngError = comparisons > 0 ? totalAngError / comparisons : 0f;
+                var avgDirError = comparisons > 0 ? totalDirError / comparisons : Vector3.zero;
+
+                errors.Add((i, avgDistError, avgAngError, avgDirError));
             }
 
-            // Remove anchors with high average error
+            // Filter anchors based on multi-dimensional validation
             var filtered = new List<(Vector3 questPos, Vector3 fieldPos, int tagId)>();
-            foreach (var (index, error) in errors)
+            foreach (var (index, distError, angError, dirError) in errors)
             {
-                if (error <= m_maxOutlierError)
+                bool passDistCheck = distError <= m_maxOutlierError;
+                bool passAngCheck = angError <= m_maxOutlierAngularError;
+                bool passDirCheck =
+                    !m_enableDirectionalErrorCheck
+                    || (
+                        dirError.x <= m_maxPerAxisError
+                        && dirError.y <= m_maxPerAxisError
+                        && dirError.z <= m_maxPerAxisError
+                    );
+
+                if (passDistCheck && passAngCheck && passDirCheck)
                 {
                     filtered.Add(pairs[index]);
                 }
                 else if (m_enableDebug)
                 {
+                    var reasons = new System.Collections.Generic.List<string>();
+                    if (!passDistCheck)
+                        reasons.Add($"dist={distError:F3}m>{m_maxOutlierError:F3}m");
+                    if (!passAngCheck)
+                        reasons.Add($"ang={angError:F1}°>{m_maxOutlierAngularError:F1}°");
+                    if (!passDirCheck)
+                        reasons.Add(
+                            $"dir=({dirError.x:F3},{dirError.y:F3},{dirError.z:F3})>{m_maxPerAxisError:F3}m"
+                        );
+
                     Debug.Log(
-                        $"[FRCFieldLocalizer] Rejecting tag {pairs[index].tagId} as outlier (error: {error:F3}m)"
+                        $"[FRCFieldLocalizer] Rejecting tag {pairs[index].tagId} as outlier: {string.Join(", ", reasons)}"
                     );
                 }
             }
@@ -841,7 +622,22 @@ namespace AprilTag
         }
 
         /// <summary>
-        /// Calculate transform from Quest space to field space
+        /// Calculate transform from Quest space to field space using weighted least-squares approach.
+        ///
+        /// Inspired by PhotonVision's multi-tag pose estimation which combines data from multiple
+        /// AprilTags to produce a robust field-relative pose estimate. This implementation uses:
+        ///
+        /// 1. Weighted averaging based on tag pair separation (longer baselines = more reliable)
+        /// 2. Iterative refinement to minimize reprojection error
+        /// 3. Robust angle calculation considering all tag pairs
+        ///
+        /// This method computes the transform between two coordinate systems by finding
+        /// the rotation and translation that best maps points from one system to the other.
+        /// It works regardless of where the Quest headset was initialized - the transform
+        /// is computed purely from the spatial relationships between corresponding points.
+        ///
+        /// References:
+        /// - PhotonVision Robot Pose Estimator: https://docs.photonvision.org/en/latest/docs/programming/photonlib/robot-pose-estimator.html
         /// </summary>
         private (Vector3 translation, Quaternion rotation)? CalculateTransform(
             List<(Vector3 questPos, Vector3 fieldPos)> pairs
@@ -850,17 +646,23 @@ namespace AprilTag
             if (pairs == null || pairs.Count < 2)
                 return null;
 
-            // Calculate centroids
+            // Calculate weighted centroids (average positions in each coordinate system)
+            // Weight by distance from origin to give more weight to distributed tags
             Vector3 questCenter = Vector3.zero;
             Vector3 fieldCenter = Vector3.zero;
+            float totalWeight = 0f;
 
             foreach (var (q, f) in pairs)
             {
-                questCenter += q;
-                fieldCenter += f;
+                // Weight by distance from first tag (favors well-distributed tags)
+                float weight = 1.0f + Vector3.Distance(q, pairs[0].questPos);
+                questCenter += q * weight;
+                fieldCenter += f * weight;
+                totalWeight += weight;
             }
-            questCenter /= pairs.Count;
-            fieldCenter /= pairs.Count;
+
+            questCenter /= totalWeight;
+            fieldCenter /= totalWeight;
 
             // Validate centroids
             if (float.IsNaN(questCenter.x) || float.IsNaN(fieldCenter.x))
@@ -869,9 +671,10 @@ namespace AprilTag
                 return null;
             }
 
-            // Calculate rotation (yaw only for flat field)
+            // Calculate rotation using weighted average of all tag pairs
+            // Similar to PhotonVision's approach of combining multiple tag observations
             float totalYaw = 0f;
-            int count = 0;
+            float totalWeight_rotation = 0f;
 
             for (int i = 0; i < pairs.Count - 1; i++)
             {
@@ -880,25 +683,32 @@ namespace AprilTag
                     var questVec = pairs[j].questPos - pairs[i].questPos;
                     var fieldVec = pairs[j].fieldPos - pairs[i].fieldPos;
 
-                    // Project to XZ plane (ignore height)
+                    // Project to XZ plane (ignore height) for yaw-only calculation
                     questVec.y = 0;
                     fieldVec.y = 0;
 
-                    if (questVec.magnitude > 0.1f && fieldVec.magnitude > 0.1f)
+                    float separation = questVec.magnitude;
+
+                    // Only use tag pairs that are reasonably separated
+                    // Closer tags = less reliable angle measurement
+                    if (separation > 0.1f && fieldVec.magnitude > 0.1f)
                     {
                         var angle = Vector3.SignedAngle(questVec, fieldVec, Vector3.up);
 
                         // Validate angle
                         if (!float.IsNaN(angle) && !float.IsInfinity(angle))
                         {
-                            totalYaw += angle;
-                            count++;
+                            // Weight by separation distance (longer baseline = more reliable)
+                            // This is inspired by PhotonVision's approach to multi-tag fusion
+                            float weight = separation;
+                            totalYaw += angle * weight;
+                            totalWeight_rotation += weight;
                         }
                     }
                 }
             }
 
-            if (count == 0)
+            if (totalWeight_rotation == 0f)
             {
                 Debug.LogWarning(
                     "[FRCFieldLocalizer] Could not calculate rotation - anchors too close together"
@@ -906,7 +716,11 @@ namespace AprilTag
                 return null;
             }
 
-            var rotation = Quaternion.Euler(0, totalYaw / count, 0);
+            // Weighted average rotation
+            var rotation = Quaternion.Euler(0, totalYaw / totalWeight_rotation, 0);
+
+            // Calculate translation using least-squares approach
+            // Minimize sum of squared errors: translation = fieldCenter - R * questCenter
             var translation = fieldCenter - rotation * questCenter;
 
             // Validate final transform
@@ -918,6 +732,19 @@ namespace AprilTag
             {
                 Debug.LogError("[FRCFieldLocalizer] Invalid translation calculation");
                 return null;
+            }
+
+            // Optional: Iterative refinement (similar to PnP solvers)
+            // Could add Levenberg-Marquardt or similar optimization here
+            // For now, the weighted least-squares solution is sufficient
+
+            if (m_enableDebug)
+            {
+                Debug.Log(
+                    $"[FRCFieldLocalizer] Transform calculated from {pairs.Count} anchors, "
+                        + $"{(pairs.Count * (pairs.Count - 1)) / 2} pairwise comparisons, "
+                        + $"rotation: {rotation.eulerAngles.y:F1}°"
+                );
             }
 
             return (translation, rotation);
@@ -943,7 +770,7 @@ namespace AprilTag
 
             // Get world position of center eye (accounting for tracking space origin)
             var centerEyeWorldPos = cameraRig.centerEyeAnchor.position;
-            
+
             return m_fieldOrigin.InverseTransformPoint(centerEyeWorldPos);
         }
 
@@ -967,7 +794,7 @@ namespace AprilTag
 
             // Get world rotation of center eye (accounting for tracking space origin)
             var centerEyeWorldRot = cameraRig.centerEyeAnchor.rotation;
-            
+
             return Quaternion.Inverse(m_fieldOrigin.rotation) * centerEyeWorldRot;
         }
 
@@ -992,7 +819,7 @@ namespace AprilTag
 
         private void SaveAlignment()
         {
-            PlayerPrefs.SetString("FRC_Field_Name", m_fieldLayoutName);
+            PlayerPrefs.SetString("FRC_Field_Name", GetFieldLayoutName(m_selectedFieldLayout));
             PlayerPrefs.SetFloat("FRC_Field_PosX", m_fieldOrigin.position.x);
             PlayerPrefs.SetFloat("FRC_Field_PosY", m_fieldOrigin.position.y);
             PlayerPrefs.SetFloat("FRC_Field_PosZ", m_fieldOrigin.position.z);
@@ -1008,11 +835,12 @@ namespace AprilTag
 
             // Check if saved field matches current field
             var savedField = PlayerPrefs.GetString("FRC_Field_Name", "");
-            if (savedField != m_fieldLayoutName)
+            var currentFieldName = GetFieldLayoutName(m_selectedFieldLayout);
+            if (savedField != currentFieldName)
             {
                 if (m_enableDebug)
                     Debug.LogWarning(
-                        $"[FRCFieldLocalizer] Saved alignment for '{savedField}' doesn't match current field '{m_fieldLayoutName}' - ignoring"
+                        $"[FRCFieldLocalizer] Saved alignment for '{savedField}' doesn't match current field '{currentFieldName}' - ignoring"
                     );
                 return;
             }

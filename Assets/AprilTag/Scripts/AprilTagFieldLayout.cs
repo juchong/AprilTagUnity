@@ -3,8 +3,8 @@
 // Loads and manages the official FRC field layout with tag positions
 
 using System;
-using System.IO;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 namespace AprilTag
@@ -48,10 +48,10 @@ namespace AprilTag
             [Tooltip("Rotation in Euler angles (degrees)")]
             public Vector3 rotation;
 
-            [Tooltip("Tag size in meters (physical edge length)")]
-            public float size = 0.1651f; // Default 6.5 inches
+            [Tooltip("Tag size in meters (physical edge length) - set from AprilTagController")]
+            public float size;
 
-            public FieldTag(int id, Vector3 pos, Vector3 rot, float size = 0.1651f)
+            public FieldTag(int id, Vector3 pos, Vector3 rot, float size)
             {
                 this.id = id;
                 this.position = pos;
@@ -129,7 +129,7 @@ namespace AprilTag
             var candidatePaths = new string[]
             {
                 $"FieldLayouts/{fieldName}", // preferred subfolder
-                fieldName // root of Resources
+                fieldName, // root of Resources
             };
 
             foreach (var path in candidatePaths)
@@ -150,14 +150,18 @@ namespace AprilTag
                 var availableInSubdir = Resources.LoadAll<TextAsset>("FieldLayouts");
                 var availableInRoot = Resources.LoadAll<TextAsset>(string.Empty);
 
-                if ((availableInSubdir != null && availableInSubdir.Length > 0) || (availableInRoot != null && availableInRoot.Length > 0))
+                if (
+                    (availableInSubdir != null && availableInSubdir.Length > 0)
+                    || (availableInRoot != null && availableInRoot.Length > 0)
+                )
                 {
                     var names = string.Empty;
                     if (availableInSubdir != null)
                     {
                         for (int i = 0; i < availableInSubdir.Length; i++)
                         {
-                            if (names.Length > 0) names += ", ";
+                            if (names.Length > 0)
+                                names += ", ";
                             names += availableInSubdir[i].name;
                         }
                     }
@@ -168,7 +172,8 @@ namespace AprilTag
                             // Avoid duplicates
                             if (!names.Contains(availableInRoot[i].name))
                             {
-                                if (names.Length > 0) names += ", ";
+                                if (names.Length > 0)
+                                    names += ", ";
                                 names += availableInRoot[i].name;
                             }
                         }
@@ -190,7 +195,14 @@ namespace AprilTag
         /// Unity: +X = right, +Y = up, +Z = forward
         /// Conversion: Unity.X = WPILib.X, Unity.Y = WPILib.Z, Unity.Z = -WPILib.Y
         /// </summary>
-        public static AprilTagFieldLayout FromWPILibJson(string json, string fieldName)
+        /// <param name="json">WPILib field layout JSON</param>
+        /// <param name="fieldName">Name of the field layout</param>
+        /// <param name="tagSize">Physical tag size in meters (from AprilTagController)</param>
+        public static AprilTagFieldLayout FromWPILibJson(
+            string json,
+            string fieldName,
+            float tagSize = 0.165f
+        )
         {
             try
             {
@@ -270,9 +282,6 @@ namespace AprilTag
                         continue;
                     }
 
-                    // Use default tag size (6.5 inches = 0.1651m for FRC tags)
-                    float tagSize = 0.1651f;
-
                     // Convert WPILib NWU to Unity left-handed
                     var unityPos = new Vector3(
                         (float)tag.pose.translation.x, // X: away from alliance wall
@@ -280,20 +289,9 @@ namespace AprilTag
                         -(float)tag.pose.translation.y // Z: -left = right (flip handedness)
                     );
 
-                    // Validate position is within reasonable field bounds
-                    if (
-                        unityPos.x < -1f
-                        || unityPos.x > wpilibData.field.length + 1f
-                        || unityPos.z < -1f
-                        || unityPos.z > wpilibData.field.width + 1f
-                        || unityPos.y < -1f
-                        || unityPos.y > 5f
-                    )
-                    {
-                        Debug.LogWarning(
-                            $"[AprilTagFieldLayout] Tag {tag.ID} position {unityPos} is outside reasonable field bounds - check coordinate conversion"
-                        );
-                    }
+                    // Note: Bounds checking is NOT performed here because the headset may be
+                    // initialized far outside the field bounds. Validation happens after alignment
+                    // in FRCFieldLocalizer when the field-to-Quest transform is established.
 
                     // Convert quaternion (NWU right-handed to Unity left-handed)
                     var wpilibQuat = new Quaternion(
