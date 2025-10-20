@@ -119,10 +119,10 @@ public class AprilTagTransforms : MonoBehaviour
             // But they might be stored as arrays or in a different format
             var cornerFields = new[]
             {
-                ("c0", "c1"), // Corner 0
-                ("p00", "p01"), // Corner 1
-                ("p10", "p11"), // Corner 2
-                ("p20", "p21"), // Corner 3
+                ("p00", "p01"), // Corner 0
+                ("p10", "p11"), // Corner 1
+                ("p20", "p21"), // Corner 2
+                ("p30", "p31"), // Corner 3
             };
 
             // Also try alternative field names that might be used
@@ -504,10 +504,10 @@ public class AprilTagTransforms : MonoBehaviour
             // But they might be stored as arrays or in a different format
             var cornerFields = new[]
             {
-                ("c0", "c1"), // Corner 0
-                ("p00", "p01"), // Corner 1
-                ("p10", "p11"), // Corner 2
-                ("p20", "p21"), // Corner 3
+                ("p00", "p01"), // Corner 0
+                ("p10", "p11"), // Corner 1
+                ("p20", "p21"), // Corner 2
+                ("p30", "p31"), // Corner 3
             };
 
             // Also try alternative field names that might be used
