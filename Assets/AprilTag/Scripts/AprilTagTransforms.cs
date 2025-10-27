@@ -26,10 +26,6 @@ public class AprilTagTransforms : MonoBehaviour
         m_controller != null && m_controller.EnableAllDebugLogging;
     private EnvironmentRaycastManager EnvironmentRaycastManager =>
         m_controller != null ? m_controller.EnvironmentRaycastManager : null;
-    private Vector3 PositionOffset =>
-        m_controller != null ? m_controller.PositionOffset : Vector3.zero;
-    private Vector3 RotationOffset =>
-        m_controller != null ? m_controller.RotationOffset : Vector3.zero;
     private float PositionScaleFactor =>
         m_controller != null ? m_controller.PositionScaleFactor : 1.0f;
     private float MinDetectionDistance =>
@@ -475,7 +471,6 @@ public class AprilTagTransforms : MonoBehaviour
                 }
             }
 
-            UseFallback:
             // Fallback: use AprilTag's 3D pose distance for initial positioning
             // This ensures we use the ray direction but with the tag's reported distance
             var tagDistance = tagPose.Position.magnitude;
@@ -1887,11 +1882,11 @@ public class AprilTagTransforms : MonoBehaviour
         {
             // Convert AprilTag position to world space
             var adjustedPosition = camRef.rotation * tag.Position;
-            return camRef.position + adjustedPosition + PositionOffset;
+            return camRef.position + adjustedPosition;
         }
 
         // Fallback to tag position if no camera reference
-        return tag.Position + PositionOffset;
+        return tag.Position;
     }
 
     /// <summary>
@@ -1905,12 +1900,11 @@ public class AprilTagTransforms : MonoBehaviour
         if (camRef != null)
         {
             // Convert AprilTag rotation to world space
-            var adjustedRotation = camRef.rotation * tag.Rotation;
-            return adjustedRotation * Quaternion.Euler(RotationOffset);
+            return camRef.rotation * tag.Rotation;
         }
 
         // Fallback to tag rotation if no camera reference
-        return tag.Rotation * Quaternion.Euler(RotationOffset);
+        return tag.Rotation;
     }
 
     /// <summary>

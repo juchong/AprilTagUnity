@@ -45,45 +45,6 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private Camera m_referenceCamera;
 
-    // POSITION OFFSET: Global position offset applied to ALL tags when using fallback (non-corner-based) positioning
-    // - Only applies when corner-based positioning fails and system falls back to direct pose approach
-    // - Added to tag's camera-space position before converting to world space
-    // - Use when all tags appear consistently shifted in the same direction (system-wide calibration)
-    // - Does NOT save to PlayerPrefs
-    [Tooltip(
-        "Global offset for fallback positioning only (when corner-based fails). Use for system-wide position calibration."
-    )]
-    [SerializeField]
-    private Vector3 m_positionOffset = Vector3.zero;
-
-    // CORNER POSITION OFFSET: Specific offset applied ONLY to corner-based positioning (primary/preferred method)
-    // - Applied directly to final world position AFTER all corner calculations and raycasting
-    // - Saves to PlayerPrefs for persistence across sessions
-    // - Can be adjusted at runtime using Quest controllers when m_enableConfigurationTool is enabled
-    //   * Right A Button: Move right/left (hold grip for left)
-    //   * Right B Button: Move up/down (hold grip for down)
-    // - This is your PRIMARY calibration tool for Quest deployment
-    [Tooltip(
-        "Offset for corner-based positioning (primary method). Saves to PlayerPrefs. Adjustable at runtime with Quest controllers when configuration tool enabled."
-    )]
-    [SerializeField]
-    private Vector3 m_cornerPositionOffset = new(0.000f, 0.000f, 0.000f);
-
-    [Tooltip("Save runtime offset to PlayerPrefs for persistence")]
-    [SerializeField]
-    private bool m_saveRuntimeOffset = true;
-
-    // ROTATION OFFSET: Euler angle offset applied to tag rotations (both corner-based and fallback methods)
-    // - Multiplied into world rotation quaternion after converting Vector3 Euler angles
-    // - Applied to BOTH positioning methods when m_enableRotationOffset is true
-    // - Use for correcting systematic rotation errors (e.g., tags mounted at 90° intervals)
-    // - Use for camera coordinate system alignment with Unity world space
-    // - Does NOT save to PlayerPrefs
-    [Tooltip(
-        "Rotation offset (Euler angles) applied to all tag rotations. Use for correcting systematic rotation errors or camera alignment."
-    )]
-    [SerializeField]
-    private Vector3 m_rotationOffset = Vector3.zero;
 
     [Tooltip("Quest-specific: Use proper passthrough camera raycasting for accurate positioning")]
     [SerializeField]
@@ -202,14 +163,6 @@ public class AprilTagController : MonoBehaviour
     // Fallback FOV value if camera intrinsics unavailable (not exposed in inspector)
     private const float FALLBACK_HORIZONTAL_FOV_DEG = 78f;
 
-    [Header("Calibration Offsets")]
-    [Tooltip("Enable position offset")]
-    [SerializeField]
-    private bool m_enablePositionOffset = true;
-
-    [Tooltip("Enable rotation offset")]
-    [SerializeField]
-    private bool m_enableRotationOffset = true;
 
     [Header("Diagnostics")]
     [Tooltip("Enable all debug logging (can be toggled at runtime)")]
@@ -226,25 +179,12 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private int m_verboseLogInterval = 300;
 
-    [Tooltip("Enable configuration tool for fine-tuning cube positioning")]
-    [SerializeField]
-    private bool m_enableConfigurationTool = false; // Disabled by default to avoid input conflicts
 
     // Public accessors for shared configuration (consumed by AprilTagTransforms)
     /// <summary>
     /// Enable or disable detailed debug logging.
     /// </summary>
     public bool EnableAllDebugLogging => m_enableAllDebugLogging;
-
-    /// <summary>
-    /// Position offset applied to tag world positions.
-    /// </summary>
-    public Vector3 PositionOffset => m_positionOffset;
-
-    /// <summary>
-    /// Rotation offset applied to tag world rotations.
-    /// </summary>
-    public Vector3 RotationOffset => m_rotationOffset;
 
     /// <summary>
     /// Global scale factor applied to tag positions.
@@ -457,10 +397,6 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private float m_maxKeepOutRadius = 0.1f;
 
-    [Tooltip("Runtime calibration step size")]
-    [SerializeField]
-    private float m_runtimeCalibrationStep = 0.01f;
-
     // CPU buffers
     private Color32[] m_rgba;
 
@@ -568,9 +504,6 @@ public class AprilTagController : MonoBehaviour
 
         // Start the permissions manager
         StartPermissionsManager();
-
-        // Load saved runtime offset
-        LoadRuntimeOffset();
 
         // Subscribe to permission events
         AprilTagPermissionsManager.OnAllPermissionsGranted += OnAllPermissionsGranted;
@@ -1269,8 +1202,7 @@ public class AprilTagController : MonoBehaviour
                 else
                 {
                     var debugCam = GetCorrectCameraReference();
-                    var debugAdjustedPosition =
-                        (t.Position + m_positionOffset) * m_positionScaleFactor;
+                    var debugAdjustedPosition = t.Position * m_positionScaleFactor;
                     var debugWorldPos =
                         debugCam.position + debugCam.rotation * debugAdjustedPosition;
                     // Debug.Log($"[AprilTag] id={t.ID} camera_pos={t.Position:F3} world_pos={debugWorldPos:F3} camera_euler={t.Rotation.eulerAngles:F1} corner_center={cornerCenter:F3}");
@@ -1314,23 +1246,17 @@ public class AprilTagController : MonoBehaviour
             if (multiCornerPosition.HasValue)
             {
                 // Use multi-corner positioning for maximum accuracy
-                worldPosition = multiCornerPosition.Value + m_cornerPositionOffset;
+                worldPosition = multiCornerPosition.Value;
                 worldRotation = m_transforms.GetCornerBasedRotation(
                     t.ID,
                     rawDetections,
                     worldPosition
                 );
 
-                // Apply rotation offset if enabled
-                if (m_enableRotationOffset)
-                {
-                    worldRotation *= Quaternion.Euler(m_rotationOffset);
-                }
-
                 if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
                 {
                     Debug.Log(
-                        $"[AprilTag] Tag {t.ID}: Multi-corner position={worldPosition}, Offset={m_cornerPositionOffset}"
+                        $"[AprilTag] Tag {t.ID}: Multi-corner position={worldPosition}"
                     );
                 }
             }
@@ -1342,24 +1268,17 @@ public class AprilTagController : MonoBehaviour
                 {
                     // Use corner-based positioning which works better with Quest's coordinate system
                     worldPosition =
-                        m_transforms.GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t)
-                        + m_cornerPositionOffset;
+                        m_transforms.GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t);
                     worldRotation = m_transforms.GetCornerBasedRotation(
                         t.ID,
                         rawDetections,
                         worldPosition
                     );
 
-                    // Apply rotation offset if enabled
-                    if (m_enableRotationOffset)
-                    {
-                        worldRotation *= Quaternion.Euler(m_rotationOffset);
-                    }
-
                     if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
                     {
                         Debug.Log(
-                            $"[AprilTag] Tag {t.ID}: Single-corner position={worldPosition}, Offset={m_cornerPositionOffset}"
+                            $"[AprilTag] Tag {t.ID}: Single-corner position={worldPosition}"
                         );
                     }
                 }
@@ -1392,12 +1311,8 @@ public class AprilTagController : MonoBehaviour
                 // Fallback to direct pose approach
                 var cam = GetCorrectCameraReference();
 
-                // Apply position offset and scaling
+                // Apply scaling
                 var adjustedPosition = t.Position * m_positionScaleFactor;
-                if (m_enablePositionOffset)
-                {
-                    adjustedPosition += m_positionOffset;
-                }
 
                 // Apply distance scaling if enabled (Phase 3: Physics-based scaling)
                 if (m_enableDistanceScaling)
@@ -1438,12 +1353,6 @@ public class AprilTagController : MonoBehaviour
                     rawDetections,
                     worldPosition
                 );
-
-                // Apply rotation offset if enabled
-                if (m_enableRotationOffset)
-                {
-                    worldRotation *= Quaternion.Euler(m_rotationOffset);
-                }
 
                 if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
                 {
@@ -1761,7 +1670,7 @@ public class AprilTagController : MonoBehaviour
                 worldRotation,
                 confidence,
                 m_tagSizeMeters,
-                m_cornerPositionOffset,
+                Vector3.zero, // No position offset needed - positioning is now accurate
                 m_placeAnchorsAtTagCenter,
                 m_anchorConfidenceThreshold,
                 m_keepOutZoneMultiplier,
@@ -2093,50 +2002,6 @@ public class AprilTagController : MonoBehaviour
 
     private void HandleQuestDebugInput()
     {
-        // Quest controller input handling for runtime calibration
-        if (m_enableConfigurationTool)
-        {
-            // Check if right grip is being held
-            var rightGripHeld = OVRInput.Get(
-                OVRInput.RawButton.RHandTrigger,
-                OVRInput.Controller.RTouch
-            );
-
-            // Right A button = move cube right (or left if grip is held)
-            if (OVRInput.GetDown(OVRInput.RawButton.A, OVRInput.Controller.RTouch))
-            {
-                if (rightGripHeld)
-                {
-                    m_cornerPositionOffset += new Vector3(-m_runtimeCalibrationStep, 0f, 0f); // Move left
-                }
-                else
-                {
-                    m_cornerPositionOffset += new Vector3(m_runtimeCalibrationStep, 0f, 0f); // Move right
-                }
-                SaveRuntimeOffset();
-                Debug.Log(
-                    $"[AprilTag] Runtime Offset: X={m_cornerPositionOffset.x:F3}, Y={m_cornerPositionOffset.y:F3}, Z={m_cornerPositionOffset.z:F3}"
-                );
-            }
-
-            // Right B button = move cube up (or down if grip is held)
-            if (OVRInput.GetDown(OVRInput.RawButton.B, OVRInput.Controller.RTouch))
-            {
-                if (rightGripHeld)
-                {
-                    m_cornerPositionOffset += new Vector3(0f, -m_runtimeCalibrationStep, 0f); // Move down
-                }
-                else
-                {
-                    m_cornerPositionOffset += new Vector3(0f, m_runtimeCalibrationStep, 0f); // Move up
-                }
-                SaveRuntimeOffset();
-                Debug.Log(
-                    $"[AprilTag] Runtime Offset: X={m_cornerPositionOffset.x:F3}, Y={m_cornerPositionOffset.y:F3}, Z={m_cornerPositionOffset.z:F3}"
-                );
-            }
-        }
-
         // Debug image capture controls (always available when Quest debugging is enabled)
         // Left controller trigger + A button = Toggle debug image saving
         if (
@@ -2163,29 +2028,6 @@ public class AprilTagController : MonoBehaviour
         }
     }
 
-    private void SaveRuntimeOffset()
-    {
-        if (m_saveRuntimeOffset)
-        {
-            PlayerPrefs.SetFloat("AprilTag_CornerOffset_X", m_cornerPositionOffset.x);
-            PlayerPrefs.SetFloat("AprilTag_CornerOffset_Y", m_cornerPositionOffset.y);
-            PlayerPrefs.SetFloat("AprilTag_CornerOffset_Z", m_cornerPositionOffset.z);
-            PlayerPrefs.Save();
-        }
-    }
-
-    private void LoadRuntimeOffset()
-    {
-        if (m_saveRuntimeOffset && PlayerPrefs.HasKey("AprilTag_CornerOffset_X"))
-        {
-            m_cornerPositionOffset = new Vector3(
-                PlayerPrefs.GetFloat("AprilTag_CornerOffset_X", 0f),
-                PlayerPrefs.GetFloat("AprilTag_CornerOffset_Y", 0f),
-                PlayerPrefs.GetFloat("AprilTag_CornerOffset_Z", 0f)
-            );
-            Debug.Log($"[AprilTag] Loaded runtime offset: {m_cornerPositionOffset}");
-        }
-    }
 
     private void SaveDebugImage(
         Color32[] pixels,
