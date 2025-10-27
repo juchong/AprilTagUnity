@@ -372,32 +372,30 @@ MonoBehaviour:
   m_tagVizPrefab: {fileID: 0}
   m_scaleVizToTagSize: 1
   m_referenceCamera: {fileID: 463475071}
-  m_positionOffset: {x: 0, y: 0, z: 0}
-  m_cornerPositionOffset: {x: 0, y: 0, z: 0}
-  m_saveRuntimeOffset: 1
-  m_rotationOffset: {x: 0, y: 0, z: 0}
   m_usePassthroughRaycasting: 1
   m_environmentRaycastManager: {fileID: 0}
   m_autoCreateRaycastManager: 1
   m_positionScaleFactor: 1
   m_minDetectionDistance: 0.3
-  m_maxDetectionDistance: 15
+  m_maxDetectionDistance: 5
   m_enableDistanceScaling: 1
   m_enableQuestDebugging: 1
   m_useImprovedIntrinsics: 1
   m_visualizationScaleMultiplier: 1
+  m_enableGravityAlignedConstraints: 1
+  m_gravityDirection: {x: 0, y: -1, z: 0}
+  m_gravityAlignmentTolerance: 15
+  m_applyGravityConstraintToPosition: 1
+  m_applyGravityConstraintToRotation: 1
   m_tagFamily: 1
   m_tagSizeMeters: 0.165
-  m_decimate: 2
+  m_decimate: 1
   m_maxDetectionsPerSecond: 15
   m_enableAdaptiveDecimation: 1
   m_useAsyncDetection: 1
-  m_enablePositionOffset: 1
-  m_enableRotationOffset: 1
   m_enableAllDebugLogging: 0
   m_logInterval: 60
   m_verboseLogInterval: 300
-  m_enableConfigurationTool: 0
   m_enableGPUPreprocessing: 1
   m_gpuPreprocessingSettings:
     EnableAdaptiveThreshold: 0
@@ -407,14 +405,14 @@ MonoBehaviour:
     HistogramStrength: 0.4
     EnableNoiseReduction: 1
     BlurRadius: 2
-    BlurSigma: 0.5
+    BlurSigma: 0.8
     EnableEdgeEnhancement: 0
     EdgeStrength: 0.3
     UseHalfPrecision: 1
     EnableDownsampling: 0
     DownsampleFactor: 0.5
-  m_debugSavePreprocessedImage: 0
-  m_debugIncludeDetectionOverlay: 0
+  m_debugSavePreprocessedImage: 1
+  m_debugIncludeDetectionOverlay: 1
   m_debugImageSaveInterval: 300
   m_maxDebugImages: 10
   m_debugSaveBothRawAndProcessed: 0
@@ -434,15 +432,15 @@ MonoBehaviour:
   m_nonConvexQualityPenalty: 0.3
   m_enableSpatialAnchors: 1
   m_spatialAnchorManager: {fileID: 1220006292}
-  m_anchorConfidenceThreshold: 0.3
+  m_ignoredTagIds: 
+  m_anchorConfidenceThreshold: 0.5
   m_distanceQualityDecayFactor: 0.01
   m_stabilityDecayFactor: 0.01
-  m_minimumConfidenceThreshold: 0.2
+  m_minimumConfidenceThreshold: 0.1
   m_placeAnchorsAtTagCenter: 1
   m_keepOutZoneMultiplier: 0.3
   m_minKeepOutRadius: 0.02
   m_maxKeepOutRadius: 0.1
-  m_runtimeCalibrationStep: 0.01
 --- !u!4 &92805405
 Transform:
   m_ObjectHideFlags: 0
@@ -1891,8 +1889,8 @@ MonoBehaviour:
   m_aprilTagController: {fileID: 0}
   m_anchorManager: {fileID: 0}
   m_fieldLayout:
-    fieldName: 2025-reefscape
-    fieldSize: {x: 16.54175, y: 8.21055}
+    FieldName: 2025-reefscape
+    FieldSize: {x: 16.54175, y: 8.21055}
     tags: []
   m_selectedFieldLayout: 4
   m_minAnchors: 3
@@ -6730,7 +6728,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_enableSpatialAnchors: 1
-  m_requiredStableFrames: 8
+  m_requiredStableFrames: 15
   m_maxDetectionTimeout: 30
   m_spatialAnchorSpawner: {fileID: 0}
   m_spatialAnchorLoader: {fileID: 0}

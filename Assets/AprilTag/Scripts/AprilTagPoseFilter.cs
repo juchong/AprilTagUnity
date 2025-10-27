@@ -21,11 +21,11 @@ namespace AprilTag
 
         [Tooltip("Position smoothing time constant (seconds)")]
         [SerializeField]
-        private float m_positionSmoothingTime = 0.1f;
+        private float m_positionSmoothingTime = 0.8f;
 
         [Tooltip("Rotation smoothing time constant (seconds)")]
         [SerializeField]
-        private float m_rotationSmoothingTime = 0.15f;
+        private float m_rotationSmoothingTime = 0.1f;
 
         [Header("Multi-Frame Validation")]
         [Tooltip("Enable multi-frame validation (rejects inconsistent detections)")]
@@ -36,13 +36,38 @@ namespace AprilTag
         [SerializeField]
         private int m_validationFrameCount = 3;
 
-        [Tooltip("Maximum position deviation for validation (meters)")]
+        [Tooltip("Base maximum position deviation for validation at 1m (meters)")]
         [SerializeField]
         private float m_maxPositionDeviation = 0.2f;
 
-        [Tooltip("Maximum rotation deviation for validation (degrees)")]
+        [Tooltip("Base maximum rotation deviation for validation at 1m (degrees)")]
         [SerializeField]
         private float m_maxRotationDeviation = 30f;
+
+        [Header("Phase 2: Distance-Aware Filtering")]
+        [Tooltip("Enable distance-dependent threshold scaling")]
+        [SerializeField]
+        private bool m_enableDistanceAwareThresholds = true;
+
+        [Tooltip("Position threshold scaling factor per meter (e.g., 0.1 = +10% per meter)")]
+        [SerializeField]
+        private float m_positionThresholdScalePerMeter = 0.1f;
+
+        [Tooltip("Rotation threshold scaling factor per meter")]
+        [SerializeField]
+        private float m_rotationThresholdScalePerMeter = 5f;
+
+        [Tooltip("Enable distance-dependent smoothing")]
+        [SerializeField]
+        private bool m_enableDistanceAwareSmoothing = true;
+
+        [Tooltip("Smoothing strength multiplier for close tags (<1m) - higher = more responsive")]
+        [SerializeField]
+        private float m_closeSmoothingMultiplier = 0.5f;
+
+        [Tooltip("Smoothing strength multiplier for far tags (>3m) - higher = more stable")]
+        [SerializeField]
+        private float m_farSmoothingMultiplier = 1.5f;
 
         [Tooltip("Time window for considering detections as recent (seconds)")]
         [SerializeField]
@@ -96,6 +121,7 @@ namespace AprilTag
             public float LastUpdateTime;
             public bool IsInitialized;
             public int FramesSinceFirstDetection;
+            public float LastKnownDistance; // Phase 2: Track distance for adaptive filtering
 
             public FilteredTagPose()
             {
@@ -106,6 +132,7 @@ namespace AprilTag
                 LastUpdateTime = 0f;
                 IsInitialized = false;
                 FramesSinceFirstDetection = 0;
+                LastKnownDistance = 1.0f; // Default to 1m
             }
         }
 
@@ -122,13 +149,73 @@ namespace AprilTag
         }
 
         /// <summary>
-        /// Validate tag detection against history
+        /// Phase 2: Calculate distance-aware position threshold
+        /// </summary>
+        private float GetDistanceAwarePositionThreshold(float distance)
+        {
+            if (!m_enableDistanceAwareThresholds)
+                return m_maxPositionDeviation;
+
+            // Scale threshold based on distance
+            // Formula: baseThreshold * (1.0 + distance * scalePerMeter)
+            // At 1m: 0.2m * (1.0 + 1.0 * 0.1) = 0.22m
+            // At 3m: 0.2m * (1.0 + 3.0 * 0.1) = 0.26m
+            // At 5m: 0.2m * (1.0 + 5.0 * 0.1) = 0.30m
+            float scaleFactor = 1.0f + distance * m_positionThresholdScalePerMeter;
+            return m_maxPositionDeviation * scaleFactor;
+        }
+
+        /// <summary>
+        /// Phase 2: Calculate distance-aware rotation threshold
+        /// </summary>
+        private float GetDistanceAwareRotationThreshold(float distance)
+        {
+            if (!m_enableDistanceAwareThresholds)
+                return m_maxRotationDeviation;
+
+            // Scale threshold based on distance
+            // Formula: baseThreshold + (distance * scalePerMeter)
+            // At 1m: 30° + (1.0 * 5°) = 35°
+            // At 3m: 30° + (3.0 * 5°) = 45°
+            // At 5m: 30° + (5.0 * 5°) = 55°
+            return m_maxRotationDeviation + (distance * m_rotationThresholdScalePerMeter);
+        }
+
+        /// <summary>
+        /// Phase 2: Calculate distance-aware smoothing multiplier
+        /// </summary>
+        private float GetDistanceAwareSmoothingMultiplier(float distance)
+        {
+            if (!m_enableDistanceAwareSmoothing)
+                return 1.0f;
+
+            // Close tags (<1m): More responsive (less smoothing)
+            if (distance < 1.0f)
+            {
+                return m_closeSmoothingMultiplier;
+            }
+            // Far tags (>3m): More stable (more smoothing)
+            else if (distance > 3.0f)
+            {
+                return m_farSmoothingMultiplier;
+            }
+            // Medium distance (1-3m): Linear interpolation
+            else
+            {
+                float t = (distance - 1.0f) / 2.0f; // Normalize to [0,1]
+                return Mathf.Lerp(m_closeSmoothingMultiplier, m_farSmoothingMultiplier, t);
+            }
+        }
+
+        /// <summary>
+        /// Validate tag detection against history (Phase 2: Distance-aware)
         /// </summary>
         public bool ValidateTagDetection(
             int tagId,
             Vector3 position,
             Quaternion rotation,
-            float cornerQuality
+            float cornerQuality,
+            float distance = 1.0f // Phase 2: Added distance parameter
         )
         {
             if (!m_enableMultiFrameValidation)
@@ -177,14 +264,18 @@ namespace AprilTag
             avgPosition /= validCount;
             avgEulerAngles /= validCount;
 
+            // Phase 2: Get distance-aware thresholds
+            float maxPositionDev = GetDistanceAwarePositionThreshold(distance);
+            float maxRotationDev = GetDistanceAwareRotationThreshold(distance);
+
             // Check position deviation
             var positionDeviation = Vector3.Distance(position, avgPosition);
-            if (positionDeviation > m_maxPositionDeviation)
+            if (positionDeviation > maxPositionDev)
             {
                 if (m_enableDebugLogging)
                 {
                     Debug.LogWarning(
-                        $"[PoseFilter] Tag {tagId} rejected - Position deviation: {positionDeviation:F3}m > {m_maxPositionDeviation:F3}m"
+                        $"[PoseFilter] Tag {tagId} rejected - Position deviation: {positionDeviation:F3}m > {maxPositionDev:F3}m (distance: {distance:F2}m)"
                     );
                 }
                 return false;
@@ -198,12 +289,12 @@ namespace AprilTag
                 Mathf.Abs(Mathf.DeltaAngle(currentEuler.z, avgEulerAngles.z))
             );
 
-            if (rotationDeviation > m_maxRotationDeviation)
+            if (rotationDeviation > maxRotationDev)
             {
                 if (m_enableDebugLogging)
                 {
                     Debug.LogWarning(
-                        $"[PoseFilter] Tag {tagId} rejected - Rotation deviation: {rotationDeviation:F1}° > {m_maxRotationDeviation:F1}°"
+                        $"[PoseFilter] Tag {tagId} rejected - Rotation deviation: {rotationDeviation:F1}° > {maxRotationDev:F1}° (distance: {distance:F2}m)"
                     );
                 }
                 return false;
@@ -220,40 +311,50 @@ namespace AprilTag
         }
 
         /// <summary>
-        /// Apply pose smoothing filter to position
+        /// Apply pose smoothing filter to position (Phase 2: Distance-aware)
         /// </summary>
         public Vector3 FilterTagPosition(
             int tagId,
             Vector3 rawPosition,
             Vector3 previousPosition,
             float deltaTime,
-            bool isInitialized
+            bool isInitialized,
+            float distance = 1.0f // Phase 2: Added distance parameter
         )
         {
             if (!m_enablePoseSmoothing || !isInitialized)
                 return rawPosition;
 
-            var smoothingFactor = Mathf.Exp(-deltaTime / m_positionSmoothingTime);
+            // Phase 2: Apply distance-aware smoothing multiplier
+            float smoothingMultiplier = GetDistanceAwareSmoothingMultiplier(distance);
+            float adjustedSmoothingTime = m_positionSmoothingTime * smoothingMultiplier;
+
+            var smoothingFactor = Mathf.Exp(-deltaTime / adjustedSmoothingTime);
             smoothingFactor = Mathf.Clamp01(smoothingFactor);
 
             return Vector3.Lerp(rawPosition, previousPosition, smoothingFactor);
         }
 
         /// <summary>
-        /// Apply pose smoothing filter to rotation
+        /// Apply pose smoothing filter to rotation (Phase 2: Distance-aware)
         /// </summary>
         public Quaternion FilterTagRotation(
             int tagId,
             Quaternion rawRotation,
             Quaternion previousRotation,
             float deltaTime,
-            bool isInitialized
+            bool isInitialized,
+            float distance = 1.0f // Phase 2: Added distance parameter
         )
         {
             if (!m_enablePoseSmoothing || !isInitialized)
                 return rawRotation;
 
-            var smoothingFactor = Mathf.Exp(-deltaTime / m_rotationSmoothingTime);
+            // Phase 2: Apply distance-aware smoothing multiplier
+            float smoothingMultiplier = GetDistanceAwareSmoothingMultiplier(distance);
+            float adjustedSmoothingTime = m_rotationSmoothingTime * smoothingMultiplier;
+
+            var smoothingFactor = Mathf.Exp(-deltaTime / adjustedSmoothingTime);
             smoothingFactor = Mathf.Clamp01(smoothingFactor);
 
             return Quaternion.Slerp(rawRotation, previousRotation, smoothingFactor);

@@ -19,10 +19,10 @@ namespace AprilTag
     {
         [Header("Field Information")]
         [Tooltip("Field name (e.g., '2025-reefscape')")]
-        public string fieldName = "2025-reefscape";
+        public string FieldName = "2025-reefscape";
 
         [Tooltip("Field dimensions in meters (width x length)")]
-        public Vector2 fieldSize = new Vector2(16.54175f, 8.21055f);
+        public Vector2 FieldSize = new Vector2(16.54175f, 8.21055f);
 
         [Header("AprilTag Positions")]
         [Tooltip("List of all AprilTags on the field with their positions and rotations")]
@@ -215,7 +215,7 @@ namespace AprilTag
                     return null;
                 }
 
-                if (wpilibData.tags == null || wpilibData.tags.Length == 0)
+                if (wpilibData.Tags == null || wpilibData.Tags.Length == 0)
                 {
                     Debug.LogError("[AprilTagFieldLayout] Invalid JSON - no tags found");
                     return null;
@@ -237,8 +237,8 @@ namespace AprilTag
 
                 var layout = new AprilTagFieldLayout
                 {
-                    fieldName = fieldName, // Use the parameter name since JSON doesn't have it
-                    fieldSize = new Vector2(
+                    FieldName = fieldName, // Use the parameter name since JSON doesn't have it
+                    FieldSize = new Vector2(
                         (float)wpilibData.field.length,
                         (float)wpilibData.field.width
                     ),
@@ -246,7 +246,7 @@ namespace AprilTag
 
                 var seenIds = new HashSet<int>();
 
-                foreach (var tag in wpilibData.tags)
+                foreach (var tag in wpilibData.Tags)
                 {
                     // Validate tag data
                     if (
@@ -351,7 +351,7 @@ namespace AprilTag
         [Serializable]
         private class WPILibFieldLayout
         {
-            public WPILibTag[] tags;
+            public WPILibTag[] Tags;
             public WPILibField field;
         }
 
@@ -429,9 +429,9 @@ namespace AprilTag
             // Draw field boundary
             Gizmos.color = Color.blue;
             var fieldCenter = origin.TransformPoint(
-                new Vector3(fieldSize.x * 0.5f, 0f, fieldSize.y * 0.5f)
+                new Vector3(FieldSize.x * 0.5f, 0f, FieldSize.y * 0.5f)
             );
-            var fieldBounds = new Vector3(fieldSize.x, 0.1f, fieldSize.y);
+            var fieldBounds = new Vector3(FieldSize.x, 0.1f, FieldSize.y);
             Gizmos.DrawWireCube(fieldCenter, fieldBounds);
         }
     }

@@ -3,11 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using AprilTag;
-using Meta.XR;
-using PassthroughCameraSamples;
-using Unity.XR.CoreUtils;
 using UnityEngine;
 
 public class AprilTagConfidenceManager : MonoBehaviour

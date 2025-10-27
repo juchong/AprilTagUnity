@@ -108,6 +108,99 @@ public class AprilTagTransforms : MonoBehaviour
         return null;
     }
 
+    /// <summary>
+    /// Extract corners WITH intrinsics transformation for debug overlays
+    /// Returns the same corners used to calculate the center in the visualization pipeline
+    /// </summary>
+    public Vector2[] TryGetCornersWithIntrinsics(
+        int tagId,
+        List<object> rawDetections,
+        PassthroughCameraIntrinsics intrinsics
+    )
+    {
+        try
+        {
+            foreach (var detection in rawDetections)
+            {
+                var detectionType = detection.GetType();
+
+                // Try to get the ID field/property
+                var idProperty =
+                    detectionType.GetProperty("ID")
+                    ?? detectionType.GetProperty("Id")
+                    ?? detectionType.GetProperty("id");
+                var idField =
+                    detectionType.GetField("ID")
+                    ?? detectionType.GetField("Id")
+                    ?? detectionType.GetField("id");
+
+                var detectionId = -1;
+                if (idProperty != null)
+                {
+                    detectionId = (int)idProperty.GetValue(detection);
+                }
+                else if (idField != null)
+                {
+                    detectionId = (int)idField.GetValue(detection);
+                }
+
+                if (detectionId == tagId)
+                {
+                    // Found the matching detection, extract corners with intrinsics
+                    return ExtractCornersWithIntrinsicsInternal(detection, intrinsics);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[Transforms] Error extracting corners for tag {tagId}: {e.Message}");
+        }
+
+        return null;
+    }
+
+    private Vector2[] ExtractCornersWithIntrinsicsInternal(
+        object detection,
+        PassthroughCameraIntrinsics intrinsics
+    )
+    {
+        // Same logic as ExtractCornerCenterWithIntrinsics but returns corners instead of center
+        var detectionType = detection.GetType();
+        var cornerFields = new[]
+        {
+            ("p00", "p01"), // Corner 1
+            ("p10", "p11"), // Corner 2
+            ("p20", "p21"), // Corner 3
+            ("p30", "p31"), // Corner 4
+        };
+
+        var corners = new List<Vector2>();
+
+        foreach (var (xField, yField) in cornerFields)
+        {
+            var xFieldRef = detectionType.GetField(
+                xField,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
+            );
+            var yFieldRef = detectionType.GetField(
+                yField,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
+            );
+
+            if (xFieldRef != null && yFieldRef != null)
+            {
+                var x = (double)xFieldRef.GetValue(detection);
+                var y = (double)yFieldRef.GetValue(detection);
+
+                // Apply Y-flip transformation (same as center calculation)
+                var unityCorner = ConvertAprilTagToUnityCoordinatesWithIntrinsics(x, y, intrinsics);
+                corners.Add(unityCorner);
+            }
+        }
+
+        return corners.Count == 4 ? corners.ToArray() : null;
+    }
+
     private Vector2? ExtractCornerCenterWithIntrinsics(
         object detection,
         PassthroughCameraIntrinsics intrinsics

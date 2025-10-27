@@ -904,7 +904,7 @@ namespace AprilTag
             if (m_fieldLayout != null)
             {
                 Gizmos.color = Color.cyan;
-                var size = new Vector3(m_fieldLayout.fieldSize.x, 0.1f, m_fieldLayout.fieldSize.y);
+                var size = new Vector3(m_fieldLayout.FieldSize.x, 0.1f, m_fieldLayout.FieldSize.y);
                 var center = m_fieldOrigin.TransformPoint(
                     new Vector3(size.x * 0.5f, 0, size.z * 0.5f)
                 );

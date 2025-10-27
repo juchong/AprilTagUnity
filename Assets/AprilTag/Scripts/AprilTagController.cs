@@ -45,7 +45,6 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private Camera m_referenceCamera;
 
-
     [Tooltip("Quest-specific: Use proper passthrough camera raycasting for accurate positioning")]
     [SerializeField]
     private bool m_usePassthroughRaycasting = true;
@@ -163,7 +162,6 @@ public class AprilTagController : MonoBehaviour
     // Fallback FOV value if camera intrinsics unavailable (not exposed in inspector)
     private const float FALLBACK_HORIZONTAL_FOV_DEG = 78f;
 
-
     [Header("Diagnostics")]
     [Tooltip("Enable all debug logging (can be toggled at runtime)")]
     [SerializeField]
@@ -178,7 +176,6 @@ public class AprilTagController : MonoBehaviour
     [Tooltip("Frame interval for verbose debug logs (e.g., 300 = ~4 seconds at 72 FPS)")]
     [SerializeField]
     private int m_verboseLogInterval = 300;
-
 
     // Public accessors for shared configuration (consumed by AprilTagTransforms)
     /// <summary>
@@ -1255,9 +1252,7 @@ public class AprilTagController : MonoBehaviour
 
                 if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
                 {
-                    Debug.Log(
-                        $"[AprilTag] Tag {t.ID}: Multi-corner position={worldPosition}"
-                    );
+                    Debug.Log($"[AprilTag] Tag {t.ID}: Multi-corner position={worldPosition}");
                 }
             }
             // Fallback: Try single corner-center positioning
@@ -1267,8 +1262,10 @@ public class AprilTagController : MonoBehaviour
                 if (cornerCenterResult.HasValue)
                 {
                     // Use corner-based positioning which works better with Quest's coordinate system
-                    worldPosition =
-                        m_transforms.GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t);
+                    worldPosition = m_transforms.GetWorldPositionFromCornerCenter(
+                        cornerCenterResult.Value,
+                        t
+                    );
                     worldRotation = m_transforms.GetCornerBasedRotation(
                         t.ID,
                         rawDetections,
@@ -1277,9 +1274,7 @@ public class AprilTagController : MonoBehaviour
 
                     if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
                     {
-                        Debug.Log(
-                            $"[AprilTag] Tag {t.ID}: Single-corner position={worldPosition}"
-                        );
+                        Debug.Log($"[AprilTag] Tag {t.ID}: Single-corner position={worldPosition}");
                     }
                 }
                 else
@@ -2028,7 +2023,6 @@ public class AprilTagController : MonoBehaviour
         }
     }
 
-
     private void SaveDebugImage(
         Color32[] pixels,
         int width,
@@ -2137,97 +2131,63 @@ public class AprilTagController : MonoBehaviour
 
             foreach (var tag in m_detector.DetectedTags)
             {
-                // Use corner-based center since it's working and gives correct image coordinates
-                Vector2? center = null;
-                string centerSource = "corner-based";
+                // Get camera intrinsics for proper coordinate transformation
+                var eye = GetWebCamManagerEye();
+                var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
 
-                // Get corner center using the same method that works in Update()
-                var cornerCenter = m_transforms.TryGetCornerBasedCenter(tag.ID, rawDetections);
-                if (cornerCenter.HasValue)
+                // Get the actual detected corners (same as visualization pipeline uses)
+                var corners = m_transforms.TryGetCornersWithIntrinsics(
+                    tag.ID,
+                    rawDetections,
+                    intrinsics
+                );
+
+                if (corners == null || corners.Length != 4)
                 {
-                    center = cornerCenter.Value;
-                }
-                else if (m_enableAllDebugLogging)
-                {
-                    Debug.LogWarning(
-                        $"[AprilTag] Could not extract corner center for tag {tag.ID}"
-                    );
-                }
-
-                if (center.HasValue)
-                {
-                    // Convert center to debug image coordinates
-                    var scaleX = (float)tex.width / m_detW;
-                    var scaleY = (float)tex.height / m_detH;
-
-                    // Apply scaling to the center point
-                    var scaledCenter = new Vector2(
-                        center.Value.x * scaleX,
-                        center.Value.y * scaleY
-                    );
-
-                    // Use a larger tag size for better visibility
-                    var tagSizePixels = 60f; // Increased size for better debugging visibility
-                    var halfSize = tagSizePixels * 0.5f;
-
                     if (m_enableAllDebugLogging)
                     {
-                        Debug.Log(
-                            $"[AprilTag] Tag {tag.ID} size calculation: tagSizePixels={tagSizePixels}, halfSize={halfSize}"
-                        );
-                    }
-
-                    // Check if the overlay would be within image bounds
-                    var minX = scaledCenter.x - halfSize;
-                    var maxX = scaledCenter.x + halfSize;
-                    var minY = scaledCenter.y - halfSize;
-                    var maxY = scaledCenter.y + halfSize;
-
-                    if (minX >= 0 && maxX < tex.width && minY >= 0 && maxY < tex.height)
-                    {
-                        // Create 4 corners for a square around the scaled center
-                        var corners = new Vector2[]
-                        {
-                            new Vector2(scaledCenter.x - halfSize, scaledCenter.y - halfSize), // Top-left
-                            new Vector2(scaledCenter.x + halfSize, scaledCenter.y - halfSize), // Top-right
-                            new Vector2(scaledCenter.x + halfSize, scaledCenter.y + halfSize), // Bottom-right
-                            new Vector2(scaledCenter.x - halfSize, scaledCenter.y + halfSize), // Bottom-left
-                        };
-
-                        if (m_enableAllDebugLogging)
-                        {
-                            Debug.Log(
-                                $"[AprilTag] Created corners for tag {tag.ID}: TL=({corners[0].x:F1}, {corners[0].y:F1}), TR=({corners[1].x:F1}, {corners[1].y:F1}), BR=({corners[2].x:F1}, {corners[2].y:F1}), BL=({corners[3].x:F1}, {corners[3].y:F1})"
-                            );
-                        }
-
-                        // Draw tag outline
-                        DrawTagOutline(tex, corners, tag.ID);
-                        overlayCount++;
-
-                        if (m_enableAllDebugLogging)
-                        {
-                            Debug.Log(
-                                $"[AprilTag] Drew overlay for tag {tag.ID} - Source: {centerSource}, Original center: {center.Value}, Scaled center: {scaledCenter}, Tag size: {tagSizePixels}px"
-                            );
-                        }
-
-                        // Draw tag ID and position info
-                        DrawTagInfo(tex, scaledCenter, tag);
-                    }
-                    else if (m_enableAllDebugLogging)
-                    {
                         Debug.LogWarning(
-                            $"[AprilTag] Tag {tag.ID} overlay would be outside image bounds - Source: {centerSource}, Center: {scaledCenter}, Size: {tagSizePixels}px, Bounds: ({minX:F1}, {minY:F1}) to ({maxX:F1}, {maxY:F1}), Image: {tex.width}x{tex.height}"
+                            $"[AprilTag] Could not extract corners for tag {tag.ID} overlay"
                         );
                     }
+                    continue;
                 }
-                else if (m_enableAllDebugLogging)
+
+                // Scale corners to texture dimensions
+                var scaleX = (float)tex.width / m_detW;
+                var scaleY = (float)tex.height / m_detH;
+
+                var scaledCorners = new Vector2[4];
+                for (int i = 0; i < 4; i++)
                 {
-                    Debug.LogWarning(
-                        $"[AprilTag] Could not determine center for tag {tag.ID} using any method"
+                    scaledCorners[i] = new Vector2(corners[i].x * scaleX, corners[i].y * scaleY);
+                }
+
+                // Calculate center from corners for tag info placement
+                var scaledCenter = Vector2.zero;
+                foreach (var corner in scaledCorners)
+                {
+                    scaledCenter += corner;
+                }
+                scaledCenter /= 4;
+
+                if (m_enableAllDebugLogging)
+                {
+                    Debug.Log(
+                        $"[AprilTag] Tag {tag.ID} actual corners: "
+                            + $"C1=({scaledCorners[0].x:F1},{scaledCorners[0].y:F1}), "
+                            + $"C2=({scaledCorners[1].x:F1},{scaledCorners[1].y:F1}), "
+                            + $"C3=({scaledCorners[2].x:F1},{scaledCorners[2].y:F1}), "
+                            + $"C4=({scaledCorners[3].x:F1},{scaledCorners[3].y:F1})"
                     );
                 }
+
+                // Draw tag outline using actual detected corners
+                DrawTagOutline(tex, scaledCorners, tag.ID);
+                overlayCount++;
+
+                // Draw tag ID at center
+                DrawTagInfo(tex, scaledCenter, tag);
             }
 
             if (m_enableAllDebugLogging)
