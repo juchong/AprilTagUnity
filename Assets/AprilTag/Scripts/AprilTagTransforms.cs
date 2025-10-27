@@ -123,14 +123,14 @@ public class AprilTagTransforms : MonoBehaviour
             var detectionType = detection.GetType();
 
             // Try to access corner coordinates based on the Detection structure we found
-            // The structure has: c0, c1, p00, p01, p10, p11, p20, p21, p30, p31
-            // But they might be stored as arrays or in a different format
+            // The structure has: c0, c1 (CENTER), p00, p01, p10, p11, p20, p21, p30, p31 (CORNERS)
+            // IMPORTANT: c0, c1 is the CENTER coordinate, NOT a corner!
             var cornerFields = new[]
             {
-                ("c0", "c1"), // Corner 0
                 ("p00", "p01"), // Corner 1
                 ("p10", "p11"), // Corner 2
                 ("p20", "p21"), // Corner 3
+                ("p30", "p31"), // Corner 4
             };
 
             // Also try alternative field names that might be used
@@ -900,14 +900,14 @@ public class AprilTagTransforms : MonoBehaviour
             var detectionType = detection.GetType();
 
             // Try to access corner coordinates based on the Detection structure we found
-            // The structure has: c0, c1, p00, p01, p10, p11, p20, p21, p30, p31
-            // But they might be stored as arrays or in a different format
+            // The structure has: c0, c1 (CENTER), p00, p01, p10, p11, p20, p21, p30, p31 (CORNERS)
+            // IMPORTANT: c0, c1 is the CENTER coordinate, NOT a corner!
             var cornerFields = new[]
             {
-                ("c0", "c1"), // Corner 0
                 ("p00", "p01"), // Corner 1
                 ("p10", "p11"), // Corner 2
                 ("p20", "p21"), // Corner 3
+                ("p30", "p31"), // Corner 4
             };
 
             // Also try alternative field names that might be used
