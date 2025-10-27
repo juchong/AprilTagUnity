@@ -118,12 +118,8 @@ public class TagVisualizations : MonoBehaviour
         cube.transform.localRotation = Quaternion.identity;
         cube.transform.localScale = new Vector3(0.1f, 0.1f, 0.1f); // 10cm cube
 
-        // Remove collider (not needed for visualization)
-        var collider = cube.GetComponent<Collider>();
-        if (collider != null)
-        {
-            Destroy(collider);
-        }
+        // Keep collider for controller interaction (AprilTagAnchorInteraction uses Physics.Raycast)
+        // The collider allows the anchor to be selected, grabbed, and manipulated with controllers
 
         // Create a material with semi-transparent cyan color
         var renderer = cube.GetComponent<MeshRenderer>();
@@ -192,12 +188,9 @@ public class TagVisualizations : MonoBehaviour
         body.transform.localRotation = Quaternion.identity;
         body.transform.localScale = new Vector3(1f, 1f, 1f); // flat; scaled later by controller
 
-        // Disable collider to avoid depth issues
-        var collider = body.GetComponent<Collider>();
-        if (collider != null)
-        {
-            Destroy(collider);
-        }
+        // Keep collider for anchor interaction (when visualization is parented to anchor)
+        // The MeshCollider on the quad allows controller raycasts to detect it
+        // This is needed for AprilTagAnchorInteraction to grab/move anchors
 
         var bodyRenderer = body.GetComponent<MeshRenderer>();
         if (bodyRenderer != null)

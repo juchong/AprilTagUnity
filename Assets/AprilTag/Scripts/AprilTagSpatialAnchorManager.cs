@@ -64,22 +64,6 @@ namespace AprilTag
         [SerializeField]
         private float m_interactionRayDistance = 10f;
 
-        [Tooltip("Distance to hold grabbed anchor from controller")]
-        [SerializeField]
-        private float m_interactionGrabDistance = 0.5f;
-
-        [Tooltip("Enable rotation control with thumbstick while grabbed")]
-        [SerializeField]
-        private bool m_interactionEnableRotation = true;
-
-        [Tooltip("Rotation speed (degrees per second per thumbstick unit)")]
-        [SerializeField]
-        private float m_interactionRotationSpeed = 90f;
-
-        [Tooltip("Smooth movement damping for grabbed anchors")]
-        [SerializeField]
-        private float m_interactionMovementDamping = 10f;
-
         [Tooltip("Enable ray visualization (line renderer)")]
         [SerializeField]
         private bool m_interactionShowRay = true;
@@ -95,10 +79,6 @@ namespace AprilTag
         [Tooltip("Highlight color for hovered anchors")]
         [SerializeField]
         private Color m_interactionHighlightColor = new Color(1f, 1f, 0f, 0.5f);
-
-        [Tooltip("Grab color for grabbed anchors")]
-        [SerializeField]
-        private Color m_interactionGrabColor = new Color(0f, 1f, 0f, 0.5f);
 
         [Header("Debug Logging")]
         [Tooltip("Enable debug logging for spatial anchor operations")]
@@ -304,19 +284,11 @@ namespace AprilTag
             var bindingFlags =
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
 
-            // Configure all interaction settings via reflection
+            // Configure interaction settings via reflection
             type.GetField("m_activeHand", bindingFlags)
                 ?.SetValue(m_anchorInteraction, m_interactionHand);
             type.GetField("m_maxRayDistance", bindingFlags)
                 ?.SetValue(m_anchorInteraction, m_interactionRayDistance);
-            type.GetField("m_grabDistance", bindingFlags)
-                ?.SetValue(m_anchorInteraction, m_interactionGrabDistance);
-            type.GetField("m_enableRotationControl", bindingFlags)
-                ?.SetValue(m_anchorInteraction, m_interactionEnableRotation);
-            type.GetField("m_rotationSpeed", bindingFlags)
-                ?.SetValue(m_anchorInteraction, m_interactionRotationSpeed);
-            type.GetField("m_movementDamping", bindingFlags)
-                ?.SetValue(m_anchorInteraction, m_interactionMovementDamping);
             type.GetField("m_showRayVisual", bindingFlags)
                 ?.SetValue(m_anchorInteraction, m_interactionShowRay);
             type.GetField("m_rayColor", bindingFlags)
@@ -325,8 +297,6 @@ namespace AprilTag
                 ?.SetValue(m_anchorInteraction, m_interactionRayWidth);
             type.GetField("m_highlightColor", bindingFlags)
                 ?.SetValue(m_anchorInteraction, m_interactionHighlightColor);
-            type.GetField("m_grabColor", bindingFlags)
-                ?.SetValue(m_anchorInteraction, m_interactionGrabColor);
 
             if (m_enableDebugLogging)
             {
