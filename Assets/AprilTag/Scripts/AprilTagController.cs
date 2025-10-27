@@ -127,6 +127,48 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private float m_visualizationScaleMultiplier = 1.0f;
 
+    [Header("Gravity-Aligned Constraints")]
+    [Tooltip(
+        "Enable gravity-aligned constraints (tags mounted flat on walls perpendicular to gravity)\n"
+            + "FIRST Robotics: ENABLE - tags are always on vertical walls\n"
+            + "General use: Disable if tags may be on angled surfaces, ceilings, or floors"
+    )]
+    [SerializeField]
+    private bool m_enableGravityAlignedConstraints = true;
+
+    [Tooltip(
+        "Gravity direction in world space\n"
+            + "Default: Vector3.down (0, -1, 0)\n"
+            + "Quest uses standard Unity coordinates where Y+ is up"
+    )]
+    [SerializeField]
+    private Vector3 m_gravityDirection = Vector3.down;
+
+    [Tooltip(
+        "Tolerance angle (degrees) for perpendicular alignment to gravity\n"
+            + "15° = accepts walls within ±15° of vertical\n"
+            + "Lower = stricter (may reject good detections on slightly angled walls)\n"
+            + "Higher = more permissive (may accept tags on angled surfaces)"
+    )]
+    [SerializeField]
+    private float m_gravityAlignmentTolerance = 15f;
+
+    [Tooltip(
+        "Apply gravity constraint to position estimation\n"
+            + "Validates that raycasted surfaces are vertical before accepting position\n"
+            + "Rejects positions on horizontal surfaces (floor/ceiling)"
+    )]
+    [SerializeField]
+    private bool m_applyGravityConstraintToPosition = true;
+
+    [Tooltip(
+        "Apply gravity constraint to rotation estimation\n"
+            + "Enforces tag surface normal is horizontal (perpendicular to gravity)\n"
+            + "Corrects rotations to align with vertical wall assumption"
+    )]
+    [SerializeField]
+    private bool m_applyGravityConstraintToRotation = true;
+
     [Header("Detection")]
     [Tooltip("Tag family to detect. Tag36h11 is recommended for ArUcO compatibility.")]
     [SerializeField]
@@ -229,6 +271,31 @@ public class AprilTagController : MonoBehaviour
     /// </summary>
     public EnvironmentRaycastManager EnvironmentRaycastManager => m_environmentRaycastManager;
 
+    /// <summary>
+    /// Whether gravity-aligned constraints are enabled (tags perpendicular to gravity).
+    /// </summary>
+    public bool EnableGravityAlignedConstraints => m_enableGravityAlignedConstraints;
+
+    /// <summary>
+    /// Gravity direction in world space.
+    /// </summary>
+    public Vector3 GravityDirection => m_gravityDirection.normalized;
+
+    /// <summary>
+    /// Tolerance angle for gravity alignment (degrees).
+    /// </summary>
+    public float GravityAlignmentTolerance => m_gravityAlignmentTolerance;
+
+    /// <summary>
+    /// Whether to apply gravity constraint to position estimation.
+    /// </summary>
+    public bool ApplyGravityConstraintToPosition => m_applyGravityConstraintToPosition;
+
+    /// <summary>
+    /// Whether to apply gravity constraint to rotation estimation.
+    /// </summary>
+    public bool ApplyGravityConstraintToRotation => m_applyGravityConstraintToRotation;
+
     [Header("GPU Preprocessing Settings")]
     [Tooltip("Enable GPU-accelerated image preprocessing for better detection quality")]
     [SerializeField]
@@ -330,42 +397,62 @@ public class AprilTagController : MonoBehaviour
     [SerializeField]
     private AprilTagSpatialAnchorManager m_spatialAnchorManager;
 
-    [Tooltip("Detection confidence threshold for anchor placement (0.0 - 1.0)")]
+    [Tooltip(
+        "Tag IDs to ignore (e.g., tags on curved surfaces or damaged tags). Array of tag numbers like [42, 99, 15]. Ignored tags will not be detected, visualized, or create anchors."
+    )]
+    [SerializeField]
+    private int[] m_ignoredTagIds = new int[0];
+
+    [Tooltip(
+        "How good does a tag need to be to create an anchor? Higher = stricter (fewer anchors, higher quality). Competition: 0.6-0.7, Practice: 0.3-0.4. Range: 0.0-1.0"
+    )]
     [Range(0.0f, 1.0f)]
     [SerializeField]
-    private float m_anchorConfidenceThreshold = 0.1f; // Lowered to allow low-confidence tags
+    private float m_anchorConfidenceThreshold = 0.1f; // GATE: Minimum confidence to create anchor
 
-    [Tooltip("Distance-based quality decay factor")]
+    [Tooltip(
+        "Distance-based quality decay factor. Higher = more penalty for far tags. Default 0.01 means 1% confidence loss per meter."
+    )]
     [SerializeField]
     private float m_distanceQualityDecayFactor = 0.01f;
 
-    [Tooltip("Stability confidence decay factor (per second)")]
+    [Tooltip(
+        "Stability confidence decay factor (per second). Higher = faster confidence loss when tag not updated. Default 0.01 means 1% loss per second."
+    )]
     [SerializeField]
     private float m_stabilityDecayFactor = 0.01f;
 
-    [Tooltip("Minimum confidence threshold")]
+    [Tooltip(
+        "What's the absolute worst confidence we'll ever report? Safety floor to prevent 0.0 confidence. Rarely needs adjustment. Keep at 0.1 unless you have specific reason to change."
+    )]
     [Range(0.0f, 1.0f)]
     [SerializeField]
-    private float m_minimumConfidenceThreshold = 0.1f;
+    private float m_minimumConfidenceThreshold = 0.1f; // FLOOR: Clamp confidence to this minimum
 
     [Tooltip(
-        "Place spatial anchors at the exact center of tags (subtracting the corner position offset)"
+        "Place spatial anchors at the exact center of tags (subtracting the corner position offset). Should be enabled for accurate field localization."
     )]
     [SerializeField]
     private bool m_placeAnchorsAtTagCenter = true;
 
     [Header("Keep Out Zone Settings")]
-    [Tooltip("Multiplier for keep out zone radius based on tag size (e.g., 0.3 = 0.3x tag size)")]
+    [Tooltip(
+        "Multiplier for keep out zone radius based on tag size. Prevents duplicate anchors for same tag. FIRST Robotics: 0.5 (tags spaced apart), Dense mounting: 0.3. Formula: radius = tag_size × multiplier"
+    )]
     [Range(0.1f, 2.0f)]
     [SerializeField]
     private float m_keepOutZoneMultiplier = 0.3f;
 
-    [Tooltip("Minimum keep out zone radius in meters (prevents too small zones)")]
+    [Tooltip(
+        "Minimum keep out zone radius in meters. Prevents zones from being too small to be effective. Typical: 0.02m (2cm) for small tags."
+    )]
     [Range(0.01f, 0.5f)]
     [SerializeField]
     private float m_minKeepOutRadius = 0.02f;
 
-    [Tooltip("Maximum keep out zone radius in meters (prevents too large zones)")]
+    [Tooltip(
+        "Maximum keep out zone radius in meters. Prevents zones from blocking adjacent tags. Typical: 0.1m (10cm) for standard spacing."
+    )]
     [Range(0.1f, 1.0f)]
     [SerializeField]
     private float m_maxKeepOutRadius = 0.1f;
@@ -1129,6 +1216,16 @@ public class AprilTagController : MonoBehaviour
 
         foreach (var t in m_detector.DetectedTags)
         {
+            // Skip ignored tag IDs (e.g., tags on curved surfaces)
+            if (IsTagIgnored(t.ID))
+            {
+                if (m_enableAllDebugLogging && detectedCount == 0)
+                {
+                    Debug.Log($"[AprilTag] Tag {t.ID} is ignored (configured in ignore list)");
+                }
+                continue;
+            }
+
             detectedCount++;
             m_seenTagsBuffer.Add(t.ID);
 
@@ -1208,14 +1305,16 @@ public class AprilTagController : MonoBehaviour
             Vector3 worldPosition;
             Quaternion worldRotation;
 
-            // Try corner-based positioning first (more accurate for Quest)
-            var cornerCenterResult = m_transforms.TryGetCornerBasedCenter(t.ID, rawDetections);
-            if (cornerCenterResult.HasValue)
+            // Try multi-corner raycasting first (best for flat surfaces)
+            var multiCornerPosition = m_transforms.TryGetWorldPositionFromMultipleCorners(
+                t.ID,
+                t,
+                rawDetections
+            );
+            if (multiCornerPosition.HasValue)
             {
-                // Use corner-based positioning which works better with Quest's coordinate system
-                worldPosition =
-                    m_transforms.GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t)
-                    + m_cornerPositionOffset;
+                // Use multi-corner positioning for maximum accuracy
+                worldPosition = multiCornerPosition.Value + m_cornerPositionOffset;
                 worldRotation = m_transforms.GetCornerBasedRotation(
                     t.ID,
                     rawDetections,
@@ -1231,11 +1330,57 @@ public class AprilTagController : MonoBehaviour
                 if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
                 {
                     Debug.Log(
-                        $"[AprilTag] Tag {t.ID}: Position={worldPosition}, Offset={m_cornerPositionOffset}"
+                        $"[AprilTag] Tag {t.ID}: Multi-corner position={worldPosition}, Offset={m_cornerPositionOffset}"
                     );
                 }
             }
+            // Fallback: Try single corner-center positioning
             else
+            {
+                var cornerCenterResult = m_transforms.TryGetCornerBasedCenter(t.ID, rawDetections);
+                if (cornerCenterResult.HasValue)
+                {
+                    // Use corner-based positioning which works better with Quest's coordinate system
+                    worldPosition =
+                        m_transforms.GetWorldPositionFromCornerCenter(cornerCenterResult.Value, t)
+                        + m_cornerPositionOffset;
+                    worldRotation = m_transforms.GetCornerBasedRotation(
+                        t.ID,
+                        rawDetections,
+                        worldPosition
+                    );
+
+                    // Apply rotation offset if enabled
+                    if (m_enableRotationOffset)
+                    {
+                        worldRotation *= Quaternion.Euler(m_rotationOffset);
+                    }
+
+                    if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
+                    {
+                        Debug.Log(
+                            $"[AprilTag] Tag {t.ID}: Single-corner position={worldPosition}, Offset={m_cornerPositionOffset}"
+                        );
+                    }
+                }
+                else
+                {
+                    // Last resort: fallback to direct pose
+                    if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
+                    {
+                        Debug.Log(
+                            $"[AprilTag] Tag {t.ID}: No corner data, falling back to direct pose"
+                        );
+                    }
+                    goto DirectPoseFallback;
+                }
+            }
+
+            // Skip the direct pose fallback section
+            goto AfterPositioning;
+
+            DirectPoseFallback:
+            // Direct pose fallback when corner-based positioning fails
             {
                 if (m_enableAllDebugLogging && detectedCount != m_previousTagCount)
                 {
@@ -1318,6 +1463,8 @@ public class AprilTagController : MonoBehaviour
                 }
             }
 
+            AfterPositioning:
+
             // PhotonVision-inspired filtering and validation
             float cornerQuality = 1.0f; // Default to perfect quality
 
@@ -1364,21 +1511,25 @@ public class AprilTagController : MonoBehaviour
                 );
             }
 
-            // Multi-frame validation (PhotonVision approach)
+            // Phase 2: Calculate distance for adaptive filtering
+            float tagDistance = t.Position.magnitude;
+
+            // Multi-frame validation (PhotonVision approach + Phase 2: Distance-aware)
             if (
                 m_poseFilter != null
                 && !m_poseFilter.ValidateTagDetection(
                     t.ID,
                     worldPosition,
                     worldRotation,
-                    cornerQuality
+                    cornerQuality,
+                    tagDistance // Phase 2: Pass distance for adaptive thresholds
                 )
             )
             {
                 continue; // Skip this detection - failed validation
             }
 
-            // Apply pose smoothing filter (PhotonVision approach)
+            // Apply pose smoothing filter (PhotonVision approach + Phase 2: Distance-aware)
             var finalPosition = worldPosition;
             var finalRotation = worldRotation;
 
@@ -1387,6 +1538,9 @@ public class AprilTagController : MonoBehaviour
                 // Get or create filtered pose
                 var filteredPose = m_poseFilter.GetFilteredPose(t.ID);
                 var deltaTime = Time.time - filteredPose.LastUpdateTime;
+
+                // Phase 2: Update distance tracking
+                filteredPose.LastKnownDistance = tagDistance;
 
                 // Increment frame counter
                 filteredPose.FramesSinceFirstDetection++;
@@ -1398,20 +1552,22 @@ public class AprilTagController : MonoBehaviour
                     filteredPose.IsInitialized = true;
                 }
 
-                // Apply temporal filtering
+                // Apply temporal filtering (Phase 2: Distance-aware smoothing)
                 finalPosition = m_poseFilter.FilterTagPosition(
                     t.ID,
                     worldPosition,
                     filteredPose.FilteredPosition,
                     deltaTime,
-                    filteredPose.IsInitialized
+                    filteredPose.IsInitialized,
+                    tagDistance // Phase 2: Pass distance for adaptive smoothing
                 );
                 finalRotation = m_poseFilter.FilterTagRotation(
                     t.ID,
                     worldRotation,
                     filteredPose.FilteredRotation,
                     deltaTime,
-                    filteredPose.IsInitialized
+                    filteredPose.IsInitialized,
+                    tagDistance // Phase 2: Pass distance for adaptive smoothing
                 );
 
                 // Update filtered pose data
@@ -1682,6 +1838,37 @@ public class AprilTagController : MonoBehaviour
             }
         }
 
+        // Apply surface alignment quality (perpendicularity check for flat surfaces)
+        if (m_transforms != null && m_poseFilter != null)
+        {
+            var filteredPose = m_poseFilter.GetFilteredPose(tag.ID);
+            if (filteredPose != null && filteredPose.IsInitialized)
+            {
+                // Try to get raw detections for surface alignment check
+                var rawDetections =
+                    m_webcamPipeline != null
+                        ? m_webcamPipeline.GetRawDetections(m_detector)
+                        : new System.Collections.Generic.List<object>();
+
+                var surfaceAlignmentQuality = m_transforms.CalculateSurfaceAlignmentQuality(
+                    tag.ID,
+                    rawDetections,
+                    filteredPose.FilteredPosition,
+                    filteredPose.FilteredRotation
+                );
+
+                // Weight surface alignment heavily for FIRST Robotics flat surfaces
+                confidence *= Mathf.Lerp(0.5f, 1.0f, surfaceAlignmentQuality);
+
+                if (m_enableAllDebugLogging)
+                {
+                    Debug.Log(
+                        $"[AprilTag]   Surface alignment quality: {surfaceAlignmentQuality:F3}, confidence after: {confidence:F3}"
+                    );
+                }
+            }
+        }
+
         // Apply multi-frame validation confidence
         if (m_poseFilter != null)
         {
@@ -1697,12 +1884,12 @@ public class AprilTagController : MonoBehaviour
         }
 
         // Apply pose smoothing confidence
-        var filteredPose = m_poseFilter?.GetFilteredPose(tag.ID);
-        if (filteredPose != null && filteredPose.IsInitialized)
+        var filteredPose2 = m_poseFilter?.GetFilteredPose(tag.ID);
+        if (filteredPose2 != null && filteredPose2.IsInitialized)
         {
             // Higher confidence for more stable poses
             var stabilityConfidence = Mathf.Clamp01(
-                1.0f - (Time.time - filteredPose.LastUpdateTime) * m_stabilityDecayFactor
+                1.0f - (Time.time - filteredPose2.LastUpdateTime) * m_stabilityDecayFactor
             );
             confidence *= stabilityConfidence;
 
@@ -1782,6 +1969,25 @@ public class AprilTagController : MonoBehaviour
         );
     }
 
+    public void ToggleGravityConstraintsRuntime()
+    {
+        m_enableGravityAlignedConstraints = !m_enableGravityAlignedConstraints;
+        Debug.Log(
+            $"[AprilTag] Gravity-aligned constraints {(m_enableGravityAlignedConstraints ? "enabled" : "disabled")} via runtime call"
+        );
+        Debug.Log($"[AprilTag]   - Position constraint: {m_applyGravityConstraintToPosition}");
+        Debug.Log($"[AprilTag]   - Rotation constraint: {m_applyGravityConstraintToRotation}");
+        Debug.Log($"[AprilTag]   - Tolerance: {m_gravityAlignmentTolerance}°");
+    }
+
+    public void SetGravityConstraintsEnabled(bool enabled)
+    {
+        m_enableGravityAlignedConstraints = enabled;
+        Debug.Log(
+            $"[AprilTag] Gravity-aligned constraints {(enabled ? "enabled" : "disabled")} via runtime call"
+        );
+    }
+
     /// <summary>
     /// Toggle debug image saving at runtime (useful for Quest debugging)
     /// </summary>
@@ -1850,6 +2056,17 @@ public class AprilTagController : MonoBehaviour
         Debug.Log($"  - Adaptive Decimation: {m_enableAdaptiveDecimation}");
         Debug.Log($"  - Tag Size: {m_tagSizeMeters}m");
         Debug.Log($"  - Camera: {cam.name} at {cam.position:F3}");
+
+        // Log gravity constraint settings
+        Debug.Log($"[AprilTag] Gravity-Aligned Constraints:");
+        Debug.Log($"  - Enabled: {m_enableGravityAlignedConstraints}");
+        if (m_enableGravityAlignedConstraints)
+        {
+            Debug.Log($"  - Gravity Direction: {m_gravityDirection.normalized}");
+            Debug.Log($"  - Alignment Tolerance: {m_gravityAlignmentTolerance}°");
+            Debug.Log($"  - Apply to Position: {m_applyGravityConstraintToPosition}");
+            Debug.Log($"  - Apply to Rotation: {m_applyGravityConstraintToRotation}");
+        }
 
         // Log distance adaptation diagnostics if available
         if (m_distanceAdaptation != null)
@@ -2447,6 +2664,78 @@ public class AprilTagController : MonoBehaviour
             {
                 Debug.Log("[Controller] Auto-created AprilTagPermissionsManager");
             }
+        }
+    }
+
+    /// <summary>
+    /// Check if a tag ID should be ignored
+    /// </summary>
+    private bool IsTagIgnored(int tagId)
+    {
+        if (m_ignoredTagIds == null || m_ignoredTagIds.Length == 0)
+            return false;
+
+        foreach (var ignoredId in m_ignoredTagIds)
+        {
+            if (tagId == ignoredId)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Add a tag ID to the ignore list at runtime
+    /// </summary>
+    public void AddIgnoredTag(int tagId)
+    {
+        if (m_ignoredTagIds == null)
+        {
+            m_ignoredTagIds = new int[] { tagId };
+        }
+        else
+        {
+            // Check if already ignored
+            foreach (var id in m_ignoredTagIds)
+            {
+                if (id == tagId)
+                    return;
+            }
+
+            // Add to array
+            var newArray = new int[m_ignoredTagIds.Length + 1];
+            m_ignoredTagIds.CopyTo(newArray, 0);
+            newArray[m_ignoredTagIds.Length] = tagId;
+            m_ignoredTagIds = newArray;
+        }
+
+        Debug.Log($"[AprilTag] Added tag {tagId} to ignore list");
+    }
+
+    /// <summary>
+    /// Remove a tag ID from the ignore list at runtime
+    /// </summary>
+    public void RemoveIgnoredTag(int tagId)
+    {
+        if (m_ignoredTagIds == null || m_ignoredTagIds.Length == 0)
+            return;
+
+        var newList = new System.Collections.Generic.List<int>();
+        bool found = false;
+
+        foreach (var id in m_ignoredTagIds)
+        {
+            if (id == tagId)
+            {
+                found = true;
+                continue;
+            }
+            newList.Add(id);
+        }
+
+        if (found)
+        {
+            m_ignoredTagIds = newList.ToArray();
+            Debug.Log($"[AprilTag] Removed tag {tagId} from ignore list");
         }
     }
 

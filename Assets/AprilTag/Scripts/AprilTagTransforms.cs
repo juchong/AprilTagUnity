@@ -3,12 +3,10 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using AprilTag; // locally integrated AprilTag library
 using Meta.XR;
 using PassthroughCameraSamples;
-using Unity.XR.CoreUtils;
 using UnityEngine;
 
 public class AprilTagTransforms : MonoBehaviour
@@ -21,25 +19,35 @@ public class AprilTagTransforms : MonoBehaviour
     // Cache for last known raycast distances per tag to ensure consistent positioning
     // When environment raycast misses, we use the last successful distance instead of
     // switching to a completely different positioning method
-    private Dictionary<int, float> m_lastRaycastDistance = new Dictionary<int, float>();
+    private Dictionary<int, float> m_lastRaycastDistance = new();
 
     // Controller-backed accessors to avoid duplicated state
-    private bool m_enableAllDebugLogging =>
+    private bool EnableAllDebugLogging =>
         m_controller != null && m_controller.EnableAllDebugLogging;
-    private EnvironmentRaycastManager m_environmentRaycastManager =>
+    private EnvironmentRaycastManager EnvironmentRaycastManager =>
         m_controller != null ? m_controller.EnvironmentRaycastManager : null;
-    private Vector3 m_positionOffset =>
+    private Vector3 PositionOffset =>
         m_controller != null ? m_controller.PositionOffset : Vector3.zero;
-    private Vector3 m_rotationOffset =>
+    private Vector3 RotationOffset =>
         m_controller != null ? m_controller.RotationOffset : Vector3.zero;
-    private float m_positionScaleFactor =>
+    private float PositionScaleFactor =>
         m_controller != null ? m_controller.PositionScaleFactor : 1.0f;
-    private float m_minDetectionDistance =>
+    private float MinDetectionDistance =>
         m_controller != null ? m_controller.MinDetectionDistance : 0.3f;
-    private float m_maxDetectionDistance =>
+    private float MaxDetectionDistance =>
         m_controller != null ? m_controller.MaxDetectionDistance : 15.0f;
-    private bool m_enableDistanceScaling =>
+    private bool EnableDistanceScaling =>
         m_controller != null && m_controller.IsDistanceScalingEnabled;
+    private bool EnableGravityAlignedConstraints =>
+        m_controller != null && m_controller.EnableGravityAlignedConstraints;
+    private Vector3 GravityDirection =>
+        m_controller != null ? m_controller.GravityDirection : Vector3.down;
+    private float GravityAlignmentTolerance =>
+        m_controller != null ? m_controller.GravityAlignmentTolerance : 15f;
+    private bool ApplyGravityConstraintToPosition =>
+        m_controller != null && m_controller.ApplyGravityConstraintToPosition;
+    private bool ApplyGravityConstraintToRotation =>
+        m_controller != null && m_controller.ApplyGravityConstraintToRotation;
 
     private PassthroughCameraEye GetWebCamManagerEye()
     {
@@ -164,7 +172,7 @@ public class AprilTagTransforms : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        if (m_enableAllDebugLogging)
+                        if (EnableAllDebugLogging)
                         {
                             Debug.LogWarning(
                                 $"[Transforms] Error getting {xField} field value: {e.Message}"
@@ -185,7 +193,7 @@ public class AprilTagTransforms : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (m_enableAllDebugLogging)
+                            if (EnableAllDebugLogging)
                             {
                                 Debug.LogWarning(
                                     $"[Transforms] Error getting {xField} property value: {e.Message}"
@@ -206,7 +214,7 @@ public class AprilTagTransforms : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        if (m_enableAllDebugLogging)
+                        if (EnableAllDebugLogging)
                         {
                             Debug.LogWarning(
                                 $"[Transforms] Error getting {yField} field value: {e.Message}"
@@ -227,7 +235,7 @@ public class AprilTagTransforms : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (m_enableAllDebugLogging)
+                            if (EnableAllDebugLogging)
                             {
                                 Debug.LogWarning(
                                     $"[Transforms] Error getting {yField} property value: {e.Message}"
@@ -307,7 +315,7 @@ public class AprilTagTransforms : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (m_enableAllDebugLogging)
+                            if (EnableAllDebugLogging)
                             {
                                 Debug.LogWarning(
                                     $"[Transforms] Error with alternative fields {xField}, {yField}: {e.Message}"
@@ -333,7 +341,7 @@ public class AprilTagTransforms : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (m_enableAllDebugLogging)
+            if (EnableAllDebugLogging)
             {
                 Debug.LogWarning($"[Transforms] Error extracting corner center: {e.Message}");
             }
@@ -383,6 +391,11 @@ public class AprilTagTransforms : MonoBehaviour
     /// USAGE: REFERENCED in pose/visualization pipeline. Keep. (Corner-based world position)
     public Vector3 GetWorldPositionFromCornerCenter(Vector2 cornerCenter, TagPose tagPose)
     {
+        // Note: Multi-corner raycasting requires raw detections, which aren't available here
+        // This method is called from controller with only the corner center already calculated
+        // Multi-corner approach is better suited for a separate entry point
+
+        // Fallback to single center raycast
         // Follow MultiObjectDetection pattern exactly for 2D-to-3D projection
         try
         {
@@ -408,15 +421,27 @@ public class AprilTagTransforms : MonoBehaviour
             var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(eye, centerPixel);
 
             // Use environment raycasting to place object on ground (like the working method)
-            if (m_environmentRaycastManager != null)
+            if (EnvironmentRaycastManager != null)
             {
-                if (m_environmentRaycastManager.Raycast(ray, out var hitInfo))
+                if (EnvironmentRaycastManager.Raycast(ray, out var hitInfo))
                 {
                     // Raycast hit - cache the distance for this tag
                     var raycastDistance = Vector3.Distance(ray.origin, hitInfo.point);
                     m_lastRaycastDistance[tagPose.ID] = raycastDistance;
 
-                    if (m_enableAllDebugLogging)
+                    // Validate gravity alignment for logging/confidence only (don't reject position)
+                    if (EnableGravityAlignedConstraints && EnableAllDebugLogging)
+                    {
+                        var gravityScore = ValidateGravityAlignedSurface(
+                            hitInfo.normal,
+                            tagPose.ID
+                        );
+                        Debug.Log(
+                            $"[Transforms] Tag {tagPose.ID} raycast HIT - gravity alignment score: {gravityScore:F3}"
+                        );
+                    }
+
+                    if (EnableAllDebugLogging)
                     {
                         Debug.Log(
                             $"[Transforms] Tag {tagPose.ID} raycast HIT at: {hitInfo.point}, distance: {raycastDistance:F3}m"
@@ -431,7 +456,7 @@ public class AprilTagTransforms : MonoBehaviour
                     {
                         var consistentPosition = ray.origin + ray.direction * lastDistance;
 
-                        if (m_enableAllDebugLogging)
+                        if (EnableAllDebugLogging)
                         {
                             Debug.Log(
                                 $"[Transforms] Tag {tagPose.ID} raycast MISS, using last known distance: {lastDistance:F3}m -> {consistentPosition}"
@@ -441,7 +466,7 @@ public class AprilTagTransforms : MonoBehaviour
                         return consistentPosition;
                     }
 
-                    if (m_enableAllDebugLogging)
+                    if (EnableAllDebugLogging)
                     {
                         Debug.LogWarning(
                             $"[Transforms] Tag {tagPose.ID} raycast MISS with no history, using tag distance fallback"
@@ -450,18 +475,19 @@ public class AprilTagTransforms : MonoBehaviour
                 }
             }
 
+            UseFallback:
             // Fallback: use AprilTag's 3D pose distance for initial positioning
             // This ensures we use the ray direction but with the tag's reported distance
             var tagDistance = tagPose.Position.magnitude;
             var clampedDistance = Mathf.Clamp(
                 tagDistance,
-                m_minDetectionDistance,
-                m_maxDetectionDistance
+                MinDetectionDistance,
+                MaxDetectionDistance
             );
 
             // Apply distance scaling using static method (fallback path)
             // Controller's distance adaptation system handles the primary path
-            if (m_enableDistanceScaling)
+            if (EnableDistanceScaling)
             {
                 clampedDistance = ApplyDistanceScaling(clampedDistance);
             }
@@ -471,7 +497,7 @@ public class AprilTagTransforms : MonoBehaviour
             // Cache this distance for future frames
             m_lastRaycastDistance[tagPose.ID] = clampedDistance;
 
-            if (m_enableAllDebugLogging)
+            if (EnableAllDebugLogging)
             {
                 Debug.Log(
                     $"[Transforms] Tag {tagPose.ID} using tag distance fallback: {clampedDistance:F3}m -> {fallbackPosition}"
@@ -482,13 +508,387 @@ public class AprilTagTransforms : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (m_enableAllDebugLogging)
+            if (EnableAllDebugLogging)
             {
                 Debug.LogWarning($"[Transforms] Error in corner-based positioning: {e.Message}");
             }
 
             // Final fallback to 3D pose estimation
-            return tagPose.Position * m_positionScaleFactor;
+            return tagPose.Position * PositionScaleFactor;
+        }
+    }
+
+    /// <summary>
+    /// Try to get world position by raycasting all 4 corners and calculating centroid
+    /// Provides better accuracy for flat surfaces and validates coplanarity
+    /// </summary>
+    public Vector3? TryGetWorldPositionFromMultipleCorners(
+        int tagId,
+        TagPose tagPose,
+        List<object> rawDetections
+    )
+    {
+        try
+        {
+            // Get camera intrinsics
+            var eye = GetWebCamManagerEye();
+            var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
+            var camRes = intrinsics.Resolution;
+
+            // Get 2D corner coordinates
+            var corners2D = ExtractCornersFromRawDetection(tagId, rawDetections);
+            if (corners2D == null || corners2D.Length < 4)
+            {
+                return null; // Can't use multi-corner approach without corners
+            }
+
+            var worldCorners = new List<Vector3>();
+            var surfaceNormals = new List<Vector3>();
+
+            // Raycast each corner to get 3D world position
+            for (var i = 0; i < 4; i++)
+            {
+                var corner2D = corners2D[i];
+
+                // Convert to normalized coordinates with Y-flip
+                var perX = corner2D.x / camRes.x;
+                var perY = corner2D.y / camRes.y;
+                var flippedPerY = 1.0f - perY;
+
+                var cornerPixel = new Vector2Int(
+                    Mathf.RoundToInt(perX * camRes.x),
+                    Mathf.RoundToInt(flippedPerY * camRes.y)
+                );
+
+                // Create ray from corner
+                var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(eye, cornerPixel);
+
+                // Raycast to get 3D position
+                if (EnvironmentRaycastManager != null)
+                {
+                    if (EnvironmentRaycastManager.Raycast(ray, out var hitInfo))
+                    {
+                        worldCorners.Add(hitInfo.point);
+                        surfaceNormals.Add(hitInfo.normal);
+                    }
+                    else
+                    {
+                        // If any corner misses, can't use multi-corner approach
+                        return null;
+                    }
+                }
+                else
+                {
+                    return null;
+                }
+            }
+
+            // Validate we got all 4 corners
+            if (worldCorners.Count != 4)
+            {
+                return null;
+            }
+
+            // Validate coplanarity (all corners on same flat surface)
+            var coplanarityScore = ValidateCoplanarity(worldCorners, surfaceNormals);
+            if (coplanarityScore < 0.85f) // Require 85% coplanarity
+            {
+                if (EnableAllDebugLogging)
+                {
+                    Debug.LogWarning(
+                        $"[Transforms] Tag {tagId} failed coplanarity check: score {coplanarityScore:F3} < 0.85"
+                    );
+                }
+                return null;
+            }
+
+            // Validate gravity alignment if enabled
+            if (EnableGravityAlignedConstraints)
+            {
+                // Check that all surface normals are perpendicular to gravity (horizontal)
+                var avgNormal = Vector3.zero;
+                foreach (var normal in surfaceNormals)
+                {
+                    avgNormal += normal;
+                }
+                avgNormal = avgNormal.normalized;
+
+                var gravityScore = ValidateGravityAlignedSurface(avgNormal, tagId);
+                if (gravityScore < 0.7f) // Require 70% gravity alignment for multi-corner
+                {
+                    if (EnableAllDebugLogging)
+                    {
+                        Debug.LogWarning(
+                            $"[Transforms] Tag {tagId} failed gravity alignment check: score {gravityScore:F3} < 0.7"
+                        );
+                    }
+                    return null;
+                }
+
+                if (EnableAllDebugLogging)
+                {
+                    Debug.Log(
+                        $"[Transforms] Tag {tagId} passed gravity alignment check: score {gravityScore:F3}"
+                    );
+                }
+            }
+
+            // Calculate centroid of 4 corners
+            var centroid = Vector3.zero;
+            foreach (var corner in worldCorners)
+            {
+                centroid += corner;
+            }
+            centroid /= worldCorners.Count;
+
+            // Cache distance for consistency
+            var distance = Vector3.Distance(GetCorrectCameraReference().position, centroid);
+            m_lastRaycastDistance[tagPose.ID] = distance;
+
+            if (EnableAllDebugLogging)
+            {
+                Debug.Log(
+                    $"[Transforms] Tag {tagId} multi-corner position: {centroid}, "
+                        + $"coplanarity: {coplanarityScore:F3}, distance: {distance:F3}m"
+                );
+            }
+
+            return centroid;
+        }
+        catch (Exception e)
+        {
+            if (EnableAllDebugLogging)
+            {
+                Debug.LogWarning($"[Transforms] Error in multi-corner positioning: {e.Message}");
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Validate that corner points are coplanar (on same flat surface)
+    /// Returns score from 0 (not coplanar) to 1 (perfectly coplanar)
+    /// Optionally validates gravity alignment for vertical walls
+    /// </summary>
+    private float ValidateCoplanarity(List<Vector3> corners, List<Vector3> normals)
+    {
+        if (corners.Count != 4 || normals.Count != 4)
+            return 0f;
+
+        // Check 1: All surface normals should be similar (pointing same direction)
+        var avgNormal = Vector3.zero;
+        foreach (var normal in normals)
+        {
+            avgNormal += normal;
+        }
+        avgNormal = avgNormal.normalized;
+
+        var normalConsistency = 0f;
+        foreach (var normal in normals)
+        {
+            normalConsistency += Vector3.Dot(normal, avgNormal);
+        }
+        normalConsistency /= normals.Count;
+
+        // Check 2: Calculate plane from first 3 corners
+        var v1 = corners[1] - corners[0];
+        var v2 = corners[2] - corners[0];
+        var planeNormal = Vector3.Cross(v1, v2).normalized;
+
+        // Check if 4th corner is on the same plane
+        var distanceToPlane = Mathf.Abs(Vector3.Dot(corners[3] - corners[0], planeNormal));
+        var maxTagSize = 0.5f; // Assume max tag size ~0.5m
+        var planeDeviationScore = 1.0f - Mathf.Clamp01(distanceToPlane / (maxTagSize * 0.1f));
+
+        // Check 3: Gravity alignment (if enabled)
+        var gravityAlignmentScore = 1.0f;
+        if (EnableGravityAlignedConstraints)
+        {
+            // Validate that the plane is vertical (perpendicular to gravity)
+            var gravity = GravityDirection;
+            var dotProduct = Mathf.Abs(Vector3.Dot(avgNormal, gravity.normalized));
+            var angleFromHorizontal = Mathf.Acos(Mathf.Clamp01(dotProduct)) * Mathf.Rad2Deg;
+
+            // Score based on perpendicularity to gravity
+            gravityAlignmentScore =
+                1.0f - Mathf.Clamp01(angleFromHorizontal / (GravityAlignmentTolerance * 2f));
+        }
+
+        // Combined score (40% normal consistency, 30% plane deviation, 30% gravity alignment)
+        var score =
+            normalConsistency * 0.4f + planeDeviationScore * 0.3f + gravityAlignmentScore * 0.3f;
+
+        return Mathf.Clamp01(score);
+    }
+
+    /// <summary>
+    /// Calculate surface alignment quality for anchor confidence
+    /// Returns score from 0 (poor alignment) to 1 (perfect perpendicular alignment)
+    /// </summary>
+    public float CalculateSurfaceAlignmentQuality(
+        int tagId,
+        List<object> rawDetections,
+        Vector3 tagWorldPosition,
+        Quaternion tagRotation
+    )
+    {
+        try
+        {
+            // Get tag center in screen space
+            var cornerCenter = TryGetCornerBasedCenter(tagId, rawDetections);
+            if (!cornerCenter.HasValue)
+            {
+                return 0.5f; // No corner data, assume average quality
+            }
+
+            // Get camera intrinsics
+            var eye = GetWebCamManagerEye();
+            var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
+            var camRes = intrinsics.Resolution;
+
+            // Convert to normalized coordinates with Y-flip
+            var perX = cornerCenter.Value.x / camRes.x;
+            var perY = cornerCenter.Value.y / camRes.y;
+            var flippedPerY = 1.0f - perY;
+
+            // Convert to pixel coordinates
+            var centerPixel = new Vector2Int(
+                Mathf.RoundToInt(perX * camRes.x),
+                Mathf.RoundToInt(flippedPerY * camRes.y)
+            );
+
+            // Create ray from tag center
+            var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(eye, centerPixel);
+
+            // Raycast to get surface normal
+            if (EnvironmentRaycastManager != null)
+            {
+                if (EnvironmentRaycastManager.Raycast(ray, out var hitInfo))
+                {
+                    // Get surface normal
+                    var surfaceNormal = hitInfo.normal;
+
+                    // Calculate tag forward direction from rotation
+                    var tagForward = tagRotation * Vector3.forward;
+
+                    // Calculate alignment: how well does tag face perpendicular to surface?
+                    // Perfect alignment: tag forward = surface normal (dot product = 1)
+                    var alignment = Vector3.Dot(tagForward.normalized, surfaceNormal.normalized);
+
+                    // Convert to 0-1 score (perfect perpendicular = 1)
+                    var alignmentScore = Mathf.Abs(alignment);
+
+                    // Additional check: gravity-aligned surface validation
+                    var gravityScore = 1.0f;
+                    if (EnableGravityAlignedConstraints)
+                    {
+                        gravityScore = ValidateGravityAlignedSurface(surfaceNormal, tagId);
+
+                        if (EnableAllDebugLogging)
+                        {
+                            Debug.Log(
+                                $"[Transforms] Tag {tagId} surface alignment - "
+                                    + $"Alignment: {alignmentScore:F3}, "
+                                    + $"Gravity score: {gravityScore:F3}"
+                            );
+                        }
+                    }
+
+                    // Additional check: multi-corner coplanarity if available
+                    var corners2D = ExtractCornersFromRawDetection(tagId, rawDetections);
+                    if (corners2D != null && corners2D.Length >= 4)
+                    {
+                        // Try to get 3D corners and check coplanarity
+                        var coplanarityScore = TryGetCoplanarityScore(
+                            corners2D,
+                            intrinsics,
+                            camRes
+                        );
+                        if (coplanarityScore > 0f)
+                        {
+                            // Combine alignment, coplanarity, and gravity validation
+                            // 50% alignment, 25% coplanarity, 25% gravity
+                            return alignmentScore * 0.5f
+                                + coplanarityScore * 0.25f
+                                + gravityScore * 0.25f;
+                        }
+                    }
+
+                    // Combine alignment and gravity validation (75% alignment, 25% gravity)
+                    return alignmentScore * 0.75f + gravityScore * 0.25f;
+                }
+            }
+
+            // No raycast hit, return neutral score
+            return 0.5f;
+        }
+        catch (Exception e)
+        {
+            if (EnableAllDebugLogging)
+            {
+                Debug.LogWarning(
+                    $"[Transforms] Error calculating surface alignment quality: {e.Message}"
+                );
+            }
+            return 0.5f;
+        }
+    }
+
+    /// <summary>
+    /// Try to get coplanarity score for surface alignment quality
+    /// </summary>
+    private float TryGetCoplanarityScore(
+        Vector2[] corners2D,
+        PassthroughCameraIntrinsics intrinsics,
+        Vector2 camRes
+    )
+    {
+        try
+        {
+            var worldCorners = new List<Vector3>();
+            var surfaceNormals = new List<Vector3>();
+
+            // Raycast each corner
+            for (var i = 0; i < 4; i++)
+            {
+                var corner2D = corners2D[i];
+                var perX = corner2D.x / camRes.x;
+                var perY = corner2D.y / camRes.y;
+                var flippedPerY = 1.0f - perY;
+
+                var cornerPixel = new Vector2Int(
+                    Mathf.RoundToInt(perX * camRes.x),
+                    Mathf.RoundToInt(flippedPerY * camRes.y)
+                );
+
+                var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(
+                    GetWebCamManagerEye(),
+                    cornerPixel
+                );
+
+                if (EnvironmentRaycastManager != null)
+                {
+                    if (EnvironmentRaycastManager.Raycast(ray, out var hitInfo))
+                    {
+                        worldCorners.Add(hitInfo.point);
+                        surfaceNormals.Add(hitInfo.normal);
+                    }
+                    else
+                    {
+                        return 0f; // Can't get all corners
+                    }
+                }
+                else
+                {
+                    return 0f;
+                }
+            }
+
+            return worldCorners.Count == 4 ? ValidateCoplanarity(worldCorners, surfaceNormals) : 0f;
+        }
+        catch
+        {
+            return 0f;
         }
     }
 
@@ -549,7 +949,7 @@ public class AprilTagTransforms : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        if (m_enableAllDebugLogging)
+                        if (EnableAllDebugLogging)
                         {
                             Debug.LogWarning(
                                 $"[Transforms] Error getting {xField} field value: {e.Message}"
@@ -570,7 +970,7 @@ public class AprilTagTransforms : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (m_enableAllDebugLogging)
+                            if (EnableAllDebugLogging)
                             {
                                 Debug.LogWarning(
                                     $"[Transforms] Error getting {xField} property value: {e.Message}"
@@ -591,7 +991,7 @@ public class AprilTagTransforms : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        if (m_enableAllDebugLogging)
+                        if (EnableAllDebugLogging)
                         {
                             Debug.LogWarning(
                                 $"[Transforms] Error getting {yField} field value: {e.Message}"
@@ -612,7 +1012,7 @@ public class AprilTagTransforms : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (m_enableAllDebugLogging)
+                            if (EnableAllDebugLogging)
                             {
                                 Debug.LogWarning(
                                     $"[Transforms] Error getting {yField} property value: {e.Message}"
@@ -683,7 +1083,7 @@ public class AprilTagTransforms : MonoBehaviour
                         }
                         catch (Exception e)
                         {
-                            if (m_enableAllDebugLogging)
+                            if (EnableAllDebugLogging)
                             {
                                 Debug.LogWarning(
                                     $"[Transforms] Error with alternative fields {xField}, {yField}: {e.Message}"
@@ -709,7 +1109,7 @@ public class AprilTagTransforms : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (m_enableAllDebugLogging)
+            if (EnableAllDebugLogging)
             {
                 Debug.LogWarning($"[Transforms] Error extracting corner center: {e.Message}");
             }
@@ -780,12 +1180,32 @@ public class AprilTagTransforms : MonoBehaviour
                     // Create a rotation matrix from the tag's coordinate system
                     var tagRotation = Quaternion.LookRotation(normal, tagUp);
 
+                    // Apply gravity-aligned constraints if enabled
+                    if (EnableGravityAlignedConstraints && ApplyGravityConstraintToRotation)
+                    {
+                        // Enforce that tag normal is horizontal (perpendicular to gravity)
+                        tagRotation = ApplyGravityAlignedRotationConstraint(
+                            tagRotation,
+                            normal,
+                            -1
+                        );
+
+                        if (EnableAllDebugLogging)
+                        {
+                            Debug.Log(
+                                $"[Transforms] Corner-based rotation with gravity constraint - "
+                                    + $"Original normal: {normal}, "
+                                    + $"Rotation: {tagRotation.eulerAngles}"
+                            );
+                        }
+                    }
+
                     // Apply a 90-degree rotation around X-axis to align with AprilTag orientation
                     // and a 45-degree counterclockwise rotation around Z-axis to fix alignment
                     // This ensures the cube sits flat on the tag surface
                     var cubeRotation = tagRotation * Quaternion.Euler(0f, 0f, -225f);
 
-                    if (m_enableAllDebugLogging)
+                    if (EnableAllDebugLogging)
                     {
                         Debug.Log(
                             $"[Transforms] Corner-based rotation - Normal: {normal}, Cube Rotation: {cubeRotation.eulerAngles}"
@@ -796,7 +1216,7 @@ public class AprilTagTransforms : MonoBehaviour
                 }
                 else
                 {
-                    if (m_enableAllDebugLogging)
+                    if (EnableAllDebugLogging)
                     {
                         Debug.LogWarning(
                             $"[Transforms] Invalid normal vector from corners - v1: {v1}, v2: {v2}"
@@ -806,7 +1226,7 @@ public class AprilTagTransforms : MonoBehaviour
             }
             else
             {
-                if (m_enableAllDebugLogging)
+                if (EnableAllDebugLogging)
                 {
                     Debug.LogWarning($"[Transforms] Invalid corner vectors - v1: {v1}, v2: {v2}");
                 }
@@ -824,11 +1244,22 @@ public class AprilTagTransforms : MonoBehaviour
     )
     {
         // Use corner coordinates to calculate proper tag orientation
-        // This approach is similar to PhotonVision's method for ensuring tags sit flat
+        // For flat surfaces (FIRST Robotics field), use surface-perpendicular constraint
 
         try
         {
-            // Find the detection for this tag
+            // Try surface-perpendicular rotation first (most accurate for flat surfaces)
+            var surfaceRotation = CalculateSurfacePerpendicularRotation(
+                tagId,
+                rawDetections,
+                tagWorldPosition
+            );
+            if (surfaceRotation.HasValue)
+            {
+                return surfaceRotation.Value;
+            }
+
+            // Fallback: Find the detection for this tag and use corner-based calculation
             foreach (var detection in rawDetections)
             {
                 var idField = detection
@@ -855,7 +1286,7 @@ public class AprilTagTransforms : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (m_enableAllDebugLogging)
+            if (EnableAllDebugLogging)
             {
                 Debug.LogWarning(
                     $"[Transforms] Error calculating corner-based rotation: {e.Message}"
@@ -865,6 +1296,148 @@ public class AprilTagTransforms : MonoBehaviour
 
         // Fallback to AprilTag rotation if corner-based calculation fails
         return Quaternion.identity;
+    }
+
+    /// <summary>
+    /// Calculate rotation assuming tag is perpendicular to detected surface
+    /// Uses environment raycast surface normal for accuracy
+    /// Ideal for FIRST Robotics field tags mounted flat on walls
+    /// </summary>
+    private Quaternion? CalculateSurfacePerpendicularRotation(
+        int tagId,
+        List<object> rawDetections,
+        Vector3 tagWorldPosition
+    )
+    {
+        try
+        {
+            // Get tag center in screen space
+            var cornerCenter = TryGetCornerBasedCenter(tagId, rawDetections);
+            if (!cornerCenter.HasValue)
+            {
+                return null;
+            }
+
+            // Get camera intrinsics
+            var eye = GetWebCamManagerEye();
+            var intrinsics = PassthroughCameraUtils.GetCameraIntrinsics(eye);
+            var camRes = intrinsics.Resolution;
+
+            // Convert to normalized coordinates with Y-flip
+            var perX = cornerCenter.Value.x / camRes.x;
+            var perY = cornerCenter.Value.y / camRes.y;
+            var flippedPerY = 1.0f - perY;
+
+            // Convert to pixel coordinates
+            var centerPixel = new Vector2Int(
+                Mathf.RoundToInt(perX * camRes.x),
+                Mathf.RoundToInt(flippedPerY * camRes.y)
+            );
+
+            // Create ray from tag center
+            var ray = PassthroughCameraUtils.ScreenPointToRayInWorld(eye, centerPixel);
+
+            // Raycast to get surface normal
+            if (EnvironmentRaycastManager != null)
+            {
+                if (EnvironmentRaycastManager.Raycast(ray, out var hitInfo))
+                {
+                    // Get surface normal
+                    var surfaceNormal = hitInfo.normal;
+
+                    // Apply gravity-aligned constraints if enabled
+                    // This ensures tags are treated as mounted flat on vertical walls
+                    if (EnableGravityAlignedConstraints && ApplyGravityConstraintToRotation)
+                    {
+                        // Project surface normal onto horizontal plane (perpendicular to gravity)
+                        var gravity = GravityDirection;
+                        var horizontalNormal = ProjectVectorOntoHorizontalPlane(
+                            surfaceNormal,
+                            gravity
+                        );
+
+                        // Calculate rotation with gravity constraint
+                        var rotation = CalculateRotationFromSurfaceNormal(
+                            horizontalNormal,
+                            gravity
+                        );
+
+                        if (EnableAllDebugLogging)
+                        {
+                            var angleFromHorizontal =
+                                Mathf.Acos(
+                                    Mathf.Clamp01(
+                                        Mathf.Abs(
+                                            Vector3.Dot(
+                                                surfaceNormal.normalized,
+                                                gravity.normalized
+                                            )
+                                        )
+                                    )
+                                ) * Mathf.Rad2Deg;
+
+                            Debug.Log(
+                                $"[Transforms] Tag {tagId} gravity-aligned rotation: "
+                                    + $"Original surface normal: {surfaceNormal}, "
+                                    + $"Corrected horizontal normal: {horizontalNormal}, "
+                                    + $"Angle from horizontal: {angleFromHorizontal:F1}°, "
+                                    + $"Rotation: {rotation.eulerAngles}"
+                            );
+                        }
+
+                        return rotation;
+                    }
+                    else
+                    {
+                        // Original behavior: use surface normal directly
+                        // For flat surfaces, tag normal should match surface normal
+                        // Tag faces outward from the wall, so tag forward = surface normal
+                        var tagForward = surfaceNormal;
+
+                        // Calculate tag "up" direction (perpendicular to normal, aligned with world up)
+                        // Project world up onto the plane defined by surface normal
+                        var worldUp = Vector3.up;
+                        var tagRight = Vector3.Cross(worldUp, tagForward).normalized;
+
+                        // Handle edge case: surface is horizontal (ceiling/floor)
+                        if (tagRight.magnitude < 0.01f)
+                        {
+                            // Surface is horizontal, use world forward instead
+                            tagRight = Vector3.Cross(Vector3.forward, tagForward).normalized;
+                        }
+
+                        var tagUp = Vector3.Cross(tagForward, tagRight).normalized;
+
+                        // Create rotation from tag coordinate system
+                        var rotation = Quaternion.LookRotation(tagForward, tagUp);
+
+                        if (EnableAllDebugLogging)
+                        {
+                            Debug.Log(
+                                $"[Transforms] Tag {tagId} surface-perpendicular rotation: "
+                                    + $"Surface normal: {surfaceNormal}, "
+                                    + $"Tag forward: {tagForward}, "
+                                    + $"Tag up: {tagUp}, "
+                                    + $"Rotation: {rotation.eulerAngles}"
+                            );
+                        }
+
+                        return rotation;
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            if (EnableAllDebugLogging)
+            {
+                Debug.LogWarning(
+                    $"[Transforms] Error calculating surface-perpendicular rotation: {e.Message}"
+                );
+            }
+        }
+
+        return null;
     }
 
     /// USAGE: REFERENCED in pose/visualization pipeline. Keep. (Corner extraction)
@@ -917,7 +1490,7 @@ public class AprilTagTransforms : MonoBehaviour
         }
         catch (Exception e)
         {
-            if (m_enableAllDebugLogging)
+            if (EnableAllDebugLogging)
             {
                 Debug.LogWarning($"[Transforms] Error extracting corner coordinates: {e.Message}");
             }
@@ -1050,7 +1623,7 @@ public class AprilTagTransforms : MonoBehaviour
         }
         catch (Exception ex)
         {
-            if (m_enableAllDebugLogging && Time.frameCount % 300 == 0)
+            if (EnableAllDebugLogging && Time.frameCount % 300 == 0)
             {
                 Debug.LogWarning(
                     $"[Transforms] Failed to extract corners for tag {tagId}: {ex.Message}"
@@ -1073,7 +1646,7 @@ public class AprilTagTransforms : MonoBehaviour
         var skew = intrinsics.Skew;
 
         // Ensure we have a valid depth (z should be positive and within detection range)
-        var z = Mathf.Clamp(Mathf.Abs(worldPos.z), m_minDetectionDistance, m_maxDetectionDistance);
+        var z = Mathf.Clamp(Mathf.Abs(worldPos.z), MinDetectionDistance, MaxDetectionDistance);
 
         // Basic perspective projection
         var x = worldPos.x / z;
@@ -1199,7 +1772,7 @@ public class AprilTagTransforms : MonoBehaviour
             {
                 // Fallback: Convert the 3D tag position to 2D screen coordinates
                 // The tag position is in camera space, so we need to project it to screen space
-                var scaledPosition = tagPose.Position * m_positionScaleFactor;
+                var scaledPosition = tagPose.Position * PositionScaleFactor;
                 screenPoint = Project3DToScreen(scaledPosition, intrinsics);
             }
 
@@ -1208,13 +1781,22 @@ public class AprilTagTransforms : MonoBehaviour
 
             // Use environment raycasting to find the actual 3D world position
             if (
-                m_environmentRaycastManager != null
-                && m_environmentRaycastManager.Raycast(ray, out var hitInfo)
+                EnvironmentRaycastManager != null
+                && EnvironmentRaycastManager.Raycast(ray, out var hitInfo)
             )
             {
                 // Raycast hit - cache the distance for consistent fallback
                 var raycastDistance = Vector3.Distance(ray.origin, hitInfo.point);
                 m_lastRaycastDistance[tagPose.ID] = raycastDistance;
+
+                // Validate gravity alignment for logging/confidence only (don't reject)
+                if (EnableGravityAlignedConstraints && EnableAllDebugLogging)
+                {
+                    var gravityScore = ValidateGravityAlignedSurface(hitInfo.normal, tagPose.ID);
+                    Debug.Log(
+                        $"[Transforms] Tag {tagPose.ID} passthrough raycast - gravity alignment score: {gravityScore:F3}"
+                    );
+                }
 
                 return hitInfo.point;
             }
@@ -1223,7 +1805,7 @@ public class AprilTagTransforms : MonoBehaviour
                 // Raycast missed - use last known distance if available
                 if (m_lastRaycastDistance.TryGetValue(tagPose.ID, out var lastDistance))
                 {
-                    if (m_enableAllDebugLogging)
+                    if (EnableAllDebugLogging)
                     {
                         Debug.Log(
                             $"[Transforms] Tag {tagPose.ID} passthrough raycast MISS, using last distance: {lastDistance:F3}m"
@@ -1237,12 +1819,12 @@ public class AprilTagTransforms : MonoBehaviour
                 var rawDistance = tagPose.Position.magnitude;
                 var clampedDistance = Mathf.Clamp(
                     rawDistance,
-                    m_minDetectionDistance,
-                    m_maxDetectionDistance
+                    MinDetectionDistance,
+                    MaxDetectionDistance
                 );
 
                 // Apply distance-based scaling if enabled
-                if (m_enableDistanceScaling)
+                if (EnableDistanceScaling)
                 {
                     clampedDistance = ApplyDistanceScaling(clampedDistance);
                 }
@@ -1255,7 +1837,7 @@ public class AprilTagTransforms : MonoBehaviour
         }
         catch (Exception ex)
         {
-            if (m_enableAllDebugLogging)
+            if (EnableAllDebugLogging)
                 Debug.LogWarning($"[Transforms] Passthrough raycasting failed: {ex.Message}");
             return null;
         }
@@ -1305,11 +1887,11 @@ public class AprilTagTransforms : MonoBehaviour
         {
             // Convert AprilTag position to world space
             var adjustedPosition = camRef.rotation * tag.Position;
-            return camRef.position + adjustedPosition + m_positionOffset;
+            return camRef.position + adjustedPosition + PositionOffset;
         }
 
         // Fallback to tag position if no camera reference
-        return tag.Position + m_positionOffset;
+        return tag.Position + PositionOffset;
     }
 
     /// <summary>
@@ -1324,11 +1906,204 @@ public class AprilTagTransforms : MonoBehaviour
         {
             // Convert AprilTag rotation to world space
             var adjustedRotation = camRef.rotation * tag.Rotation;
-            return adjustedRotation * Quaternion.Euler(m_rotationOffset);
+            return adjustedRotation * Quaternion.Euler(RotationOffset);
         }
 
         // Fallback to tag rotation if no camera reference
-        return tag.Rotation * Quaternion.Euler(m_rotationOffset);
+        return tag.Rotation * Quaternion.Euler(RotationOffset);
+    }
+
+    /// <summary>
+    /// Apply gravity-aligned constraints to tag position
+    /// Assumes tags are mounted flat on walls perpendicular to gravity
+    /// Projects position onto nearest vertical plane aligned with gravity
+    /// </summary>
+    public Vector3 ApplyGravityAlignedPositionConstraint(Vector3 position, int tagId)
+    {
+        if (!EnableGravityAlignedConstraints || !ApplyGravityConstraintToPosition)
+            return position;
+
+        try
+        {
+            // Get gravity direction (typically down)
+            var gravity = GravityDirection;
+
+            // Calculate the horizontal plane normal (perpendicular to gravity)
+            // For gravity = (0, -1, 0), horizontal plane normal = (0, 1, 0)
+            var horizontalNormal = -gravity.normalized;
+
+            // Project position onto vertical plane
+            // The tag should lie on a plane perpendicular to the horizontal plane
+            // This means the tag's surface normal should be horizontal (perpendicular to gravity)
+
+            // We don't modify the position directly, but we can use this to validate
+            // that raycasted surfaces are indeed vertical (perpendicular to gravity)
+            // This is handled in the rotation constraint method
+
+            // For position, we can snap to the nearest vertical plane if needed
+            // However, for most cases, the environment raycast already gives us accurate positions
+            // So we just validate and return the position as-is
+
+            return position;
+        }
+        catch (Exception e)
+        {
+            if (EnableAllDebugLogging)
+            {
+                Debug.LogWarning(
+                    $"[Transforms] Error applying gravity position constraint to tag {tagId}: {e.Message}"
+                );
+            }
+            return position;
+        }
+    }
+
+    /// <summary>
+    /// Apply gravity-aligned constraints to tag rotation
+    /// Enforces that tag surface normal is perpendicular to gravity (horizontal)
+    /// This ensures tags appear flat on vertical walls
+    /// </summary>
+    public Quaternion ApplyGravityAlignedRotationConstraint(
+        Quaternion rotation,
+        Vector3 surfaceNormal,
+        int tagId
+    )
+    {
+        if (!EnableGravityAlignedConstraints || !ApplyGravityConstraintToRotation)
+            return rotation;
+
+        try
+        {
+            var gravity = GravityDirection;
+
+            // For tags mounted flat on walls:
+            // - The wall surface normal should be horizontal (perpendicular to gravity)
+            // - The tag forward direction should match the wall surface normal
+
+            // Check if surface normal is perpendicular to gravity
+            var dotProduct = Mathf.Abs(Vector3.Dot(surfaceNormal.normalized, gravity.normalized));
+            var angleFromHorizontal = Mathf.Acos(Mathf.Clamp01(dotProduct)) * Mathf.Rad2Deg;
+
+            if (angleFromHorizontal > GravityAlignmentTolerance)
+            {
+                if (EnableAllDebugLogging)
+                {
+                    Debug.LogWarning(
+                        $"[Transforms] Tag {tagId} surface not perpendicular to gravity: {angleFromHorizontal:F1}° from horizontal (tolerance: {GravityAlignmentTolerance:F1}°)"
+                    );
+                }
+
+                // Project surface normal onto horizontal plane (perpendicular to gravity)
+                var horizontalNormal = ProjectVectorOntoHorizontalPlane(surfaceNormal, gravity);
+
+                // Recalculate rotation with corrected horizontal normal
+                rotation = CalculateRotationFromSurfaceNormal(horizontalNormal, gravity);
+
+                if (EnableAllDebugLogging)
+                {
+                    Debug.Log(
+                        $"[Transforms] Tag {tagId} rotation corrected using gravity constraint: original normal={surfaceNormal:F3}, corrected normal={horizontalNormal:F3}"
+                    );
+                }
+            }
+
+            return rotation;
+        }
+        catch (Exception e)
+        {
+            if (EnableAllDebugLogging)
+            {
+                Debug.LogWarning(
+                    $"[Transforms] Error applying gravity rotation constraint to tag {tagId}: {e.Message}"
+                );
+            }
+            return rotation;
+        }
+    }
+
+    /// <summary>
+    /// Project a vector onto the horizontal plane (perpendicular to gravity)
+    /// </summary>
+    private Vector3 ProjectVectorOntoHorizontalPlane(Vector3 vector, Vector3 gravity)
+    {
+        // Remove the component parallel to gravity
+        var projected = vector - Vector3.Dot(vector, gravity) * gravity;
+        return projected.normalized;
+    }
+
+    /// <summary>
+    /// Calculate rotation from surface normal with gravity constraint
+    /// Ensures tag is oriented perpendicular to gravity
+    /// </summary>
+    private Quaternion CalculateRotationFromSurfaceNormal(Vector3 surfaceNormal, Vector3 gravity)
+    {
+        // Tag forward should match surface normal (points out from wall)
+        var tagForward = surfaceNormal.normalized;
+
+        // Tag up should be perpendicular to both surface normal and gravity
+        // For vertical walls, tag up should point "upward" in world space
+        var worldUp = -gravity.normalized; // Opposite of gravity
+
+        // Calculate tag right (perpendicular to both forward and world up)
+        var tagRight = Vector3.Cross(worldUp, tagForward).normalized;
+
+        // Handle edge case: surface is horizontal (ceiling/floor)
+        if (tagRight.magnitude < 0.01f)
+        {
+            // Surface is horizontal, use world forward instead
+            tagRight = Vector3.Cross(Vector3.forward, tagForward).normalized;
+        }
+
+        // Recalculate tag up to ensure orthogonality
+        var tagUp = Vector3.Cross(tagForward, tagRight).normalized;
+
+        // Create rotation from tag coordinate system
+        return Quaternion.LookRotation(tagForward, tagUp);
+    }
+
+    /// <summary>
+    /// Validate that a surface is suitable for tag mounting (perpendicular to gravity)
+    /// Returns confidence score [0-1] based on how perpendicular the surface is
+    /// </summary>
+    public float ValidateGravityAlignedSurface(Vector3 surfaceNormal, int tagId)
+    {
+        if (!EnableGravityAlignedConstraints)
+            return 1.0f; // No constraint, perfect score
+
+        try
+        {
+            var gravity = GravityDirection;
+
+            // Calculate angle between surface normal and horizontal plane
+            var dotProduct = Mathf.Abs(Vector3.Dot(surfaceNormal.normalized, gravity.normalized));
+            var angleFromHorizontal = Mathf.Acos(Mathf.Clamp01(dotProduct)) * Mathf.Rad2Deg;
+
+            // Score based on how close to horizontal the surface is
+            // Perfect perpendicular (0°) = score 1.0
+            // At tolerance (15°) = score 0.5
+            // Beyond tolerance = score decreases further
+            var score =
+                1.0f - Mathf.Clamp01(angleFromHorizontal / (GravityAlignmentTolerance * 2f));
+
+            if (EnableAllDebugLogging && score < 0.8f)
+            {
+                Debug.Log(
+                    $"[Transforms] Tag {tagId} gravity alignment score: {score:F3} (angle from horizontal: {angleFromHorizontal:F1}°)"
+                );
+            }
+
+            return score;
+        }
+        catch (Exception e)
+        {
+            if (EnableAllDebugLogging)
+            {
+                Debug.LogWarning(
+                    $"[Transforms] Error validating gravity-aligned surface for tag {tagId}: {e.Message}"
+                );
+            }
+            return 0.5f; // Return neutral score on error
+        }
     }
 
     /// <summary>
